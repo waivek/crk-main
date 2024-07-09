@@ -1,2 +1,6 @@
 waivek
 wheel
+flask
+flask_cors
+requests
+bs4
