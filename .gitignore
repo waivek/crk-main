@@ -1,3 +1,5 @@
 .direnv/
 .envrc
 data/
+__pycache__/
+cache/
