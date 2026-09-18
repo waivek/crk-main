@@ -1,0 +1,22 @@
+
+     Monday     00:00AM KST - Sugar Ore, Flour, Crystals, Butter Amber (gray)
+                Break: Amber Fossil, Emerald Fossil, Purple Fossil, Butter Amber, Chalk
+     Tuesday    00:00AM KST - Sugar Ore, Flour, Crystals, Butter Amber (gray)
+                Break: Amber Fossil, Emerald Fossil, Purple Fossil, Butter Amber
+     Wednesday  00:00AM KST - Sugar Ore, Flour, Crystals, Butter Amber (gray)
+                Break: Amber Fossil, Emerald Fossil, Purple Fossil, Butter Amber
+     Thursday   00:00AM KST - Sugar Ore, Flour, Crystals, Butter Amber (gray)
+                Break: Emerald Fossil, Purple Fossil, Butter Amber, Flour
+     Friday     00:00AM KST - Chalk
+                Break: Emerald Fossil, Purple Fossil, Butter Amber, Crystals, Flour, Sugar Ore
+[bt] Saturday   00:00AM KST - Chalk then Amber Fossil
+                Break: Emerald Fossil, Purple Fossil, Butter Amber
+[bt] Sunday     00:00AM KST - Chalk then Amber Fossil
+                Break: Emerald Fossil, Purple Fossil, Butter Amber
+
+Notes:
+- On Friday, put 24 Hours before Burning Time, below the "Thursday" text
+- For [bt] use the Burning Time icon. You can infer the rest.
+- Sunday and Saturday the burning time "icon" should be merged vertically on the left of the Sunday and Saturday text.
+- Between Friday and Saturday add a "Banner" Burning Time starts and also a claim Mining Bell. There is a mining bell icon as well which you should use.
+- For Butter Amber (gray) use the Butter Amber icon but add a grayscale over it.
