@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mines — What to Mine</title>
+  <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@400;600;700;800&family=Open+Sans:wght@500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20,400,0,0" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0c0c0c;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 28px 16px;
+      font-family: 'Raleway', sans-serif;
+    }
+
+    .card {
+      background: #141414;
+      border: 1px solid #2a2a2a;
+      border-radius: 14px;
+      padding: 24px 28px;
+      max-width: 980px;
+      width: 100%;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.7);
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 16px;
+    }
+
+    .header h1 {
+      font-size: 1.3rem;
+      font-weight: 800;
+      color: #ffffff;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .divider {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, #2e2e2e 30%, #2e2e2e 70%, transparent);
+      margin-bottom: 12px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0 var(--row-gap); /* gap between rows */
+    }
+
+    thead tr th {
+      font-size: 0.62rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: white;
+      padding: 0 12px;
+      text-align: left;
+    }
+
+    .break-header {
+      color: #d94444;
+    }
+
+    .break-header .material-symbols-outlined {
+      font-size: 13px;
+      vertical-align: middle;
+      margin-bottom: 2px;
+    }
+
+    :root {
+      --row-gap: 10px; /* gap between rows */
+      --row-shadow: 2px 2px 3px 0 #000;
+      --shadow-room: 6px; /* horizontal room so row shadows aren't clipped by .table-wrap */
+    }
+
+    /* ── Row base ── */
+    /* Backgrounds live on cells (clipped to padding-box) so the gap border
+       doesn't square off the top corners. */
+    tbody tr:hover td:first-child { background-color: #202020; }
+    tbody tr.burning td { background-color: #1a1a1a; }
+    tbody tr.burning:hover td:first-child { background-color: #1e1e1e; }
+
+    /* ── Cell base ── */
+    td {
+      padding: 9px 12px;
+      vertical-align: middle;
+      background-color: #1c1c1c;
+      box-shadow: var(--row-shadow);
+    }
+
+    /* Fully rounded rows: everything except the banner and the row under it */
+    .fully-rounded td:first-child { border-radius: 8px 0 0 8px; }
+    .fully-rounded td:last-child  { border-radius: 0 8px 8px 0; }
+    .fully-rounded td:only-child  { border-radius: 8px; }
+
+    /* ── Banner row ── */
+    .banner-row { background: transparent !important; }
+    .banner-row:hover { background: transparent !important; }
+
+    .banner-row td {
+      padding: 0;
+      background: transparent;
+      box-shadow: none; /* the .banner element carries its own shadow */
+    }
+
+    /* ── Saturday: connected flush to banner ── */
+    /* Sharp top corners, rounded bottom corners */
+    .banner-row + tr td:first-child { border-radius: 0 0 0 8px; }
+    .banner-row + tr td:last-child  { border-radius: 0 0 8px 0; }
+
+    /* ── Day column ── */
+    .day-cell { white-space: nowrap; }
+
+    .day-line {
+      display: flex;
+      align-items: baseline;
+      gap: 7px;
+    }
+
+    .day-name {
+      font-size: 0.8rem;
+      font-weight: 800;
+      color: #e8e8e8;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .day-time {
+      font-size: 0.64rem;
+      font-weight: 600;
+      color: #888;
+      font-feature-settings: 'tnum' 1;
+      letter-spacing: 0.03em;
+    }
+
+    .day-subtext {
+      display: inline-flex;
+      align-items: center;
+      margin-top: 5px;
+      padding: 2px 7px;
+      background: #1e1e1e;
+      border: 1px solid #3a3a3a;
+      border-radius: 4px;
+      font-size: 0.6rem;
+      font-weight: 800;
+      color: #c8c8c8;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    /* Burning-time rows: icon left of day name */
+    .day-line-bt {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .bt-icon-left {
+      width: 24px;
+      height: 24px;
+      object-fit: contain;
+      flex-shrink: 0;
+      filter: drop-shadow(0 1px 3px rgba(0,0,0,0.5));
+    }
+
+    /* ── Column tints ── */
+    tbody tr td:nth-child(2) { background-color: #101e12; }
+    tbody tr td:nth-child(3) { background-color: #1e1010; }
+
+    /* ── Cards to Queue column ── */
+    .items {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .item img {
+      width: 36px;
+      height: 36px;
+      object-fit: contain;
+      filter: drop-shadow(0 1px 3px rgba(0,0,0,0.55));
+      transition: transform 0.15s;
+    }
+
+    .item img:hover { transform: scale(1.1); }
+
+    .item-label {
+      font-size: 0.56rem;
+      font-weight: 700;
+      color: #5a5a5a;
+      text-align: center;
+      white-space: nowrap;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .item-gray img {
+      filter: grayscale(1) brightness(0.6);
+    }
+
+    .arrow {
+      font-size: 1.6rem;
+      font-weight: 800;
+      color: #aaa;
+      flex-shrink: 0;
+      line-height: 1;
+    }
+
+    /* ── Break column ── */
+    .break-items {
+      display: grid;
+      grid-template-columns: repeat(3, 28px);
+      gap: 4px 6px;
+    }
+
+    .break-item img {
+      width: 28px;
+      height: 28px;
+      object-fit: contain;
+      filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+      transition: transform 0.15s;
+      display: block;
+    }
+
+    .break-item img:hover { transform: scale(1.12); }
+
+    /* ── Banner ── */
+    .banner {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 22px;
+      padding: 10px 28px;
+      background: linear-gradient(180deg, #6094f8 0%, #4272e8 40%, #3060d8 100%);
+      border-radius: 8px 8px 0 0;
+      position: relative;
+      overflow: hidden;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.22),
+        0 var(--row-gap) 0 #3060d8, /* fills the row gap so Saturday sits flush */
+        var(--row-shadow);
+    }
+
+    .banner::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent 5%, rgba(255,255,255,0.5) 50%, transparent 95%);
+    }
+
+    .banner-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .banner-item img {
+      width: 26px;
+      height: 26px;
+      object-fit: contain;
+      filter: drop-shadow(0 1px 4px rgba(0,0,0,0.4));
+    }
+
+    .banner-text {
+      font-size: 0.7rem;
+      font-weight: 800;
+      color: #fff;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.35);
+    }
+
+    .banner-sep {
+      width: 1px;
+      height: 18px;
+      background: rgba(255,255,255,0.25);
+      flex-shrink: 0;
+    }
+
+    .wrapper {
+      max-width: 980px;
+      width: 100%;
+    }
+
+    .disclaimer {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 14px 0 0;
+      padding: 8px 12px;
+      background: #1a1500;
+      border: 1px solid #3a2e00;
+      border-left: 3px solid #b8860b;
+      border-radius: 6px;
+      font-size: 0.62rem;
+      font-weight: 700;
+      color: #c8a830;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .disclaimer img {
+      width: 22px;
+      height: 22px;
+      object-fit: contain;
+      flex-shrink: 0;
+      filter: grayscale(1) brightness(0.6);
+    }
+
+    .watermark {
+      margin-top: 8px;
+      text-align: right;
+      font-family: 'Open Sans', sans-serif;
+      font-size: 0.62rem;
+      font-weight: 500;
+      color: #666;
+      letter-spacing: 0.03em;
+    }
+
+    .table-wrap {
+      /* cancel border-spacing above first / below last row; padding gives the shadows room, negative margin cancels it */
+      margin: calc(-1 * var(--row-gap)) calc(-1 * var(--shadow-room));
+      padding: 0 var(--shadow-room);
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .current-time-row td {
+      background-color: #0d2b1a !important;
+      padding: 8px 12px;
+    }
+
+    .current-time-row .ct-label {
+      font-size: 0.55rem;
+      font-weight: 800;
+      color: #4ade80;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-bottom: 2px;
+    }
+
+    .current-time-row .ct-value {
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: #86efac;
+      letter-spacing: 0.03em;
+    }
+
+    .rel-time {
+      font-size: 0.58rem;
+      font-weight: 700;
+      color: #777;
+      letter-spacing: 0.04em;
+      margin-top: 3px;
+    }
+
+    @media (max-width: 600px) {
+      .card { padding: 16px 12px; }
+
+      thead tr th { padding: 0 6px; font-size: 0.55rem; }
+
+      td { padding: 7px 6px; }
+
+      .day-cell { white-space: normal; }
+      .day-name { font-size: 0.7rem; }
+      .day-time { font-size: 0.56rem; }
+      .day-line { flex-direction: column; align-items: flex-start; gap: 1px; }
+
+      .item img { width: 26px; height: 26px; }
+      .items { gap: 4px; }
+
+      .break-items { grid-template-columns: repeat(3, 22px); gap: 3px 4px; }
+      .break-item img { width: 22px; height: 22px; }
+
+      .banner { gap: 10px; padding: 8px 12px; flex-wrap: wrap; justify-content: center; }
+      .banner-text { white-space: normal; font-size: 0.62rem; text-align: center; }
+
+      .bt-icon-left { width: 20px; height: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+  <div class="card">
+    <div class="header">
+      <h1>Mines — What to Mine</h1>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Day</th>
+          <th>Cards to Queue</th>
+          <th class="break-header">
+            <span class="material-symbols-outlined">delete</span>
+            Break
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+
+        <!-- Monday -->
+        <tr class="fully-rounded">
+          <td class="day-cell">
+            <div class="day-line">
+              <span class="day-name">Monday</span>
+              <span class="day-time">00:00 AM KST</span>
+            </div>
+          </td>
+          <td>
+            <div class="items">
+              <div class="item"><img src="/icons/sugar_ore.png" alt="Sugar Ore"></div>
+              <div class="item"><img src="/icons/flour.png" alt="Flour"></div>
+              <div class="item"><img src="/icons/crystal.png" alt="Crystals"></div>
+              <div class="item item-gray"><img src="/icons/butter_amber.png" alt="Butter Amber"></div>
+            </div>
+          </td>
+          <td>
+            <div class="break-items">
+              <div class="break-item"><img src="/icons/amber_fossil.png" alt="Amber Fossil"></div>
+              <div class="break-item"><img src="/icons/emerald_fossil.png" alt="Emerald Fossil"></div>
+              <div class="break-item"><img src="/icons/purple_fossil.png" alt="Purple Fossil"></div>
+              <div class="break-item"><img src="/icons/butter_amber.png" alt="Butter Amber"></div>
+              <div class="break-item"><img src="/icons/chalk.png" alt="Chalk"></div>
+            </div>
+          </td>
+        </tr>
+
+        <!-- Tuesday -->
+        <tr class="fully-rounded">
+          <td class="day-cell">
+            <div class="day-line">
+              <span class="day-name">Tuesday</span>
+              <span class="day-time">00:00 AM KST</span>
+            </div>
+          </td>
+          <td>
+            <div class="items">
+              <div class="item"><img src="/icons/sugar_ore.png" alt="Sugar Ore"></div>
+              <div class="item"><img src="/icons/flour.png" alt="Flour"></div>
+              <div class="item"><img src="/icons/crystal.png" alt="Crystals"></div>
+              <div class="item item-gray"><img src="/icons/butter_amber.png" alt="Butter Amber"></div>
+            </div>
+          </td>
+          <td>
+            <div class="break-items">
+              <div class="break-item"><img src="/icons/amber_fossil.png" alt="Amber Fossil"></div>
+              <div class="break-item"><img src="/icons/emerald_fossil.png" alt="Emerald Fossil"></div>
+              <div class="break-item"><img src="/icons/purple_fossil.png" alt="Purple Fossil"></div>
+              <div class="break-item"><img src="/icons/butter_amber.png" alt="Butter Amber"></div>
+            </div>
+          </td>
+        </tr>
+
+        <!-- Wednesday -->
+        <tr class="fully-rounded">
+          <td class="day-cell">
+            <div class="day-line">
+              <span class="day-name">Wednesday</span>
+              <span class="day-time">00:00 AM KST</span>
+            </div>
+          </td>
+          <td>
+            <div class="items">
+              <div class="item"><img src="/icons/sugar_ore.png" alt="Sugar Ore"></div>
+              <div class="item"><img src="/icons/flour.png" alt="Flour"></div>
+              <div class="item"><img src="/icons/crystal.png" alt="Crystals"></div>
+              <div class="item item-gray"><img src="/icons/butter_amber.png" alt="Butter Amber"></div>
+            </div>
+          </td>
+          <td>
+            <div class="break-items">
+              <div class="break-item"><img src="/icons/amber_fossil.png" alt="Amber Fossil"></div>
+              <div class="break-item"><img src="/icons/emerald_fossil.png" alt="Emerald Fossil"></div>
+              <div class="break-item"><img src="/icons/purple_fossil.png" alt="Purple Fossil"></div>
+              <div class="break-item"><img src="/icons/butter_amber.png" alt="Butter Amber"></div>
+            </div>
+          </td>
+        </tr>
+
+        <!-- Thursday -->
+        <tr class="fully-rounded">
+          <td class="day-cell">
+            <div class="day-line">
+              <span class="day-name">Thursday</span>
+              <span class="day-time">00:00 AM KST</span>
+            </div>
+          </td>
+          <td>
+            <div class="items">
+              <div class="item"><img src="/icons/sugar_ore.png" alt="Sugar Ore"></div>
+              <div class="item"><img src="/icons/flour.png" alt="Flour"></div>
+              <div class="item"><img src="/icons/crystal.png" alt="Crystals"></div>
+              <div class="item item-gray"><img src="/icons/butter_amber.png" alt="Butter Amber"></div>
+            </div>
+          </td>
+          <td>
+            <div class="break-items">
+              <div class="break-item"><img src="/icons/emerald_fossil.png" alt="Emerald Fossil"></div>
+              <div class="break-item"><img src="/icons/purple_fossil.png" alt="Purple Fossil"></div>
+              <div class="break-item"><img src="/icons/butter_amber.png" alt="Butter Amber"></div>
+              <div class="break-item"><img src="/icons/flour.png" alt="Flour"></div>
+            </div>
+          </td>
+        </tr>
+
+        <!-- Friday -->
+        <tr class="fully-rounded">
+          <td class="day-cell">
+            <div class="day-line">
+              <span class="day-name">Friday</span>
+              <span class="day-time">00:00 AM KST</span>
+            </div>
+            <div class="day-subtext">24 Hours Before Burning Time</div>
+          </td>
+          <td>
+            <div class="items">
+              <div class="item"><img src="/icons/chalk.png" alt="Chalk"></div>
+            </div>
+          </td>
+          <td>
+            <div class="break-items">
+              <div class="break-item"><img src="/icons/emerald_fossil.png" alt="Emerald Fossil"></div>
+              <div class="break-item"><img src="/icons/purple_fossil.png" alt="Purple Fossil"></div>
+              <div class="break-item"><img src="/icons/butter_amber.png" alt="Butter Amber"></div>
+              <div class="break-item"><img src="/icons/crystal.png" alt="Crystals"></div>
+              <div class="break-item"><img src="/icons/flour.png" alt="Flour"></div>
+              <div class="break-item"><img src="/icons/sugar_ore.png" alt="Sugar Ore"></div>
+            </div>
+          </td>
+        </tr>
+
+        <!-- Banner: flush top of merged Saturday block -->
+        <tr class="banner-row">
+          <td colspan="3">
+            <div class="banner">
+              <div class="banner-item">
+                <img src="/icons/burning_time.png" alt="Burning Time">
+                <span class="banner-text">Burning Time Starts</span>
+              </div>
+              <div class="banner-sep"></div>
+              <div class="banner-item">
+                <img src="/icons/bell_of_glory.png" alt="Mining Bell">
+                <span class="banner-text">Claim Mining Bell</span>
+              </div>
+            </div>
+          </td>
+        </tr>
+
+        <!-- Saturday: flush bottom of merged block -->
+        <tr class="burning">
+          <td class="day-cell">
+            <div class="day-line-bt">
+              <img class="bt-icon-left" src="/icons/burning_time.png" alt="Burning Time">
+              <div class="day-line">
+                <span class="day-name">Saturday</span>
+                <span class="day-time">00:00 AM KST</span>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="items">
+              <div class="item"><img src="/icons/chalk.png" alt="Chalk"></div>
+              <span class="arrow">›</span>
+              <div class="item"><img src="/icons/amber_fossil.png" alt="Amber Fossil"></div>
+            </div>
+          </td>
+          <td>
+            <div class="break-items">
+              <div class="break-item"><img src="/icons/emerald_fossil.png" alt="Emerald Fossil"></div>
+              <div class="break-item"><img src="/icons/purple_fossil.png" alt="Purple Fossil"></div>
+              <div class="break-item"><img src="/icons/butter_amber.png" alt="Butter Amber"></div>
+            </div>
+          </td>
+        </tr>
+
+        <!-- Sunday -->
+        <tr class="burning fully-rounded">
+          <td class="day-cell">
+            <div class="day-line-bt">
+              <img class="bt-icon-left" src="/icons/burning_time.png" alt="Burning Time">
+              <div class="day-line">
+                <span class="day-name">Sunday</span>
+                <span class="day-time">00:00 AM KST</span>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="items">
+              <div class="item"><img src="/icons/chalk.png" alt="Chalk"></div>
+              <span class="arrow">›</span>
+              <div class="item"><img src="/icons/amber_fossil.png" alt="Amber Fossil"></div>
+            </div>
+          </td>
+          <td>
+            <div class="break-items">
+              <div class="break-item"><img src="/icons/emerald_fossil.png" alt="Emerald Fossil"></div>
+              <div class="break-item"><img src="/icons/purple_fossil.png" alt="Purple Fossil"></div>
+              <div class="break-item"><img src="/icons/butter_amber.png" alt="Butter Amber"></div>
+            </div>
+          </td>
+        </tr>
+
+      </tbody>
+    </table>
+    </div>
+
+    <div class="disclaimer">
+      <img src="/icons/butter_amber.png" alt="Butter Amber">
+      Only queue Butter Amber if you need a specific tart — otherwise break it 100%
+    </div>
+
+  </div>
+  <div class="watermark">infographic by @westphalia</div>
+  </div>
+</body>
+<script>
+(function () {
+  var params = new URLSearchParams(window.location.search);
+  if (params.get('infographic') === 'true') return;
+
+  var now = new Date();
+  var msPerDay = 86400000;
+
+  // Hide header user-time; current time goes in the table instead
+  var userTimeEl = document.getElementById('user-time');
+  if (userTimeEl) userTimeEl.style.display = 'none';
+
+  // KST = UTC+9, no DST
+  var KST = 9 * 3600 * 1000;
+  var kstNowMs = now.getTime() + KST;
+  var kstTodayMidnightMs = kstNowMs - (kstNowMs % msPerDay);
+  var kstTodayMidnight = new Date(kstTodayMidnightMs - KST);
+  var kstDayNum = new Date(kstTodayMidnightMs).getUTCDay();
+
+  function relTime(target) {
+    var diffMs = target.getTime() - now.getTime();
+    var past = diffMs < 0;
+    var abs = Math.abs(diffMs);
+    var mins  = Math.round(abs / 60000);
+    var hours = Math.round(abs / 3600000);
+    var days  = Math.round(abs / 86400000);
+    var str = mins < 60 ? mins + 'm' : hours < 24 ? hours + 'h' : days + 'd';
+    return past ? str + ' ago' : 'in ' + str;
+  }
+
+  var nameToJSDay = {
+    Monday: 1, Tuesday: 2, Wednesday: 3,
+    Thursday: 4, Friday: 5, Saturday: 6, Sunday: 0
+  };
+
+  var upcoming = [];
+  var rowData = [];
+
+  document.querySelectorAll('tbody tr').forEach(function (row) {
+    var nameEl = row.querySelector('.day-name');
+    if (!nameEl) return;
+    var dayName = nameEl.textContent.trim();
+    var jsDay = nameToJSDay[dayName];
+    if (jsDay === undefined) return;
+
+    var subtext = row.querySelector('.day-subtext');
+    if (subtext) subtext.style.display = 'none';
+
+    var daysOffset = jsDay - kstDayNum;
+    if (daysOffset > 3)  daysOffset -= 7;
+    if (daysOffset < -3) daysOffset += 7;
+
+    var kstMidnight = new Date(kstTodayMidnight.getTime() + daysOffset * msPerDay);
+    rowData.push({ row: row, kstMidnight: kstMidnight });
+
+    if (kstMidnight.getDay() !== jsDay) {
+      nameEl.firstChild.textContent = kstMidnight.toLocaleDateString(undefined, { weekday: 'long' });
+    }
+
+    var timeStr = kstMidnight.toLocaleTimeString(undefined, {
+      hour: '2-digit', minute: '2-digit', timeZoneName: 'short'
+    });
+    var timeEl = row.querySelector('.day-time');
+    if (timeEl) timeEl.textContent = timeStr;
+
+    var container = row.querySelector('.day-line-bt') || row.querySelector('.day-line');
+    if (container) {
+      var rel = document.createElement('div');
+      rel.className = 'rel-time';
+      rel.textContent = relTime(kstMidnight);
+      container.parentNode.insertBefore(rel, container.nextSibling);
+      var diffMs = kstMidnight.getTime() - now.getTime();
+      if (diffMs > 0) upcoming.push({ el: rel, diffMs: diffMs });
+    }
+  });
+
+  if (upcoming.length) {
+    upcoming.sort(function (a, b) { return a.diffMs - b.diffMs; });
+    upcoming[0].el.style.color = '#e6b800';
+    upcoming[0].el.style.fontWeight = '800';
+  }
+
+  // Insert Current Time row between the last past row and first future row
+  rowData.sort(function (a, b) { return a.kstMidnight - b.kstMidnight; });
+
+  var insertAfter = null;
+  for (var i = 0; i < rowData.length; i++) {
+    if (rowData[i].kstMidnight.getTime() <= now.getTime()) insertAfter = rowData[i].row;
+  }
+
+  var ctRow = document.createElement('tr');
+  ctRow.className = 'current-time-row fully-rounded';
+  var ctTd = document.createElement('td');
+  ctTd.colSpan = 3;
+  var isBurning = !!(insertAfter && insertAfter.classList.contains('burning'));
+  var ctText =
+    '<div class="ct-label">Current Time</div>' +
+    '<div class="ct-value">' +
+    now.toLocaleString(undefined, {
+      weekday: 'long', month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit', timeZoneName: 'short'
+    }) + '</div>';
+  ctTd.innerHTML = isBurning
+    ? '<div class="day-line-bt">' +
+      '<img class="bt-icon-left" src="/icons/burning_time.png" alt="Burning Time">' +
+      '<div>' + ctText + '</div></div>'
+    : ctText;
+  ctRow.appendChild(ctTd);
+
+  var tbody = document.querySelector('tbody');
+  if (insertAfter) {
+    var next = insertAfter.nextElementSibling;
+    // skip banner-row so current-time sits before it, not between banner and Saturday
+    if (next && next.classList.contains('banner-row')) {
+      tbody.insertBefore(ctRow, next);
+    } else {
+      tbody.insertBefore(ctRow, insertAfter.nextSibling);
+    }
+  } else {
+    tbody.insertBefore(ctRow, tbody.firstChild);
+  }
+})();
+</script>
+</html>

@@ -1,14 +1,14 @@
-from waivek import Timer   # Single Use
+from box import Timer   # Single Use
 timer = Timer()
-from waivek import Code    # Multi-Use
-from waivek import handler # Single Use
-from waivek import ic, ib     # Multi-Use, import time: 70ms - 110ms
-from waivek import rel2abs
+from box import Code    # Multi-Use
+from box import handler # Single Use
+from box import ic, ib     # Multi-Use, import time: 70ms - 110ms
+from box import rel2abs
 Code; ic; ib; rel2abs
 from batch_get_all_cookies import batch_get_all_cookies
 import requests
 from bs4 import BeautifulSoup
-from waivek import read, write
+from box import read, write
 
 
 import time
