@@ -1,0 +1,10 @@
+{% extends "todo/_auth_form.html" %}
+{% set heading = "Sign up" %}
+{% set pw_autocomplete = "new-password" %}
+{% block title %}Sign up · Todo{% endblock %}
+{% block extra_fields %}
+    <label>Confirm password
+      <input name="confirm" type="password" autocomplete="new-password" required>
+    </label>
+{% endblock %}
+{% block switch %}Have an account? <a href="{{ url_for('todo.login_page') }}">Log in</a>{% endblock %}

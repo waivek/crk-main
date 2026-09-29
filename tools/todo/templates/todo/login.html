@@ -1,0 +1,5 @@
+{% extends "todo/_auth_form.html" %}
+{% set heading = "Log in" %}
+{% set pw_autocomplete = "current-password" %}
+{% block title %}Log in · Todo{% endblock %}
+{% block switch %}No account? <a href="{{ url_for('todo.signup_page') }}">Sign up</a>{% endblock %}

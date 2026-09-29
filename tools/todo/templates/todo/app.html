@@ -1,0 +1,238 @@
+{% extends "todo/base.html" %}
+{% block head %}
+  <meta name="csrf-token" content="{{ csrf }}">
+  <meta name="todo-base" content="{{ url_for('todo.index') }}">
+  <meta name="todo-api" content="{{ api_base }}">
+{% endblock %}
+{% block body %}
+<header class="top">
+  <h1>Todo</h1>
+  <form id="add-bay" class="inline-form">
+    <input name="name" placeholder="New bay" maxlength="200" required autocomplete="off" aria-label="New bay name">
+    <button class="icon-btn" title="Add bay" aria-label="Add bay"><span class="material-symbols-outlined">add</span></button>
+  </form>
+  <div class="top-actions">
+    <button id="undo" class="icon-btn" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><span class="material-symbols-outlined">undo</span></button>
+    <button id="redo" class="icon-btn" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled><span class="material-symbols-outlined">redo</span></button>
+    {% if mode != "preset" %}
+    <button id="browse" class="icon-btn" title="Browse the preset: add tasks you don't have" aria-label="Browse the preset">
+      <span class="material-symbols-outlined">library_add</span></button>
+    {% endif %}
+    {% if mode == "robot" %}
+    <span class="chip" title="Public debug account: anyone with this URL can edit it">
+      <span class="material-symbols-outlined" aria-hidden="true">smart_toy</span>robot · public
+    </span>
+    {% elif mode == "preset" %}
+    <a class="chip" href="{{ url_for('todo.index') }}" title="Back to your own list">
+      <span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>my list
+    </a>
+    {% else %}
+    {% if is_admin %}
+    <a class="icon-btn" href="{{ url_for('todo.admin_index') }}" title="Edit the preset for everyone" aria-label="Edit preset">
+      <span class="material-symbols-outlined">admin_panel_settings</span>
+    </a>
+    {% endif %}
+    <span class="muted">{{ username }}</span>
+    <form method="post" action="{{ url_for('todo.logout') }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="icon-btn" title="Log out" aria-label="Log out"><span class="material-symbols-outlined">logout</span></button>
+    </form>
+    {% endif %}
+  </div>
+</header>
+
+{% if mode == "preset" %}
+<div class="banner admin-banner">
+  <span class="material-symbols-outlined" aria-hidden="true">admin_panel_settings</span>
+  <span>Editing the <b>preset</b>. New users start with everything here. Anything you add later shows up
+  for existing users under <b>Suggested</b>, where they can import it.</span>
+</div>
+{% endif %}
+
+<div class="clocks">
+  <span><span class="material-symbols-outlined" aria-hidden="true">schedule</span>Local <time id="local-time"></time> <span id="local-zone" class="muted"></span></span>
+  <span><span class="material-symbols-outlined" aria-hidden="true">restart_alt</span>Reset (<span id="reset-label"></span>) <b class="countdown" id="reset-countdown" data-refresh="1"></b></span>
+</div>
+
+<section id="suggested" hidden aria-label="Suggested from the preset"></section>
+
+<nav class="tabs" role="tablist" aria-label="Sections">
+  <button type="button" role="tab" id="tab-tasks" data-tab="tasks" aria-controls="panel-tasks" aria-selected="true">
+    <span class="material-symbols-outlined" aria-hidden="true">checklist</span>Tasks
+  </button>
+  <button type="button" role="tab" id="tab-cooldowns" data-tab="cooldowns" aria-controls="panel-cooldowns" aria-selected="false">
+    <span class="material-symbols-outlined" aria-hidden="true">hourglass_empty</span>Cooldowns
+    <span class="badge" id="cooldowns-full" title="Full: ready to claim" hidden></span>
+  </button>
+</nav>
+
+<div id="panel-tasks" role="tabpanel" aria-labelledby="tab-tasks">
+  <nav id="filters" aria-label="Filter by category"></nav>
+  <main id="bays"></main>
+</div>
+
+<div id="panel-cooldowns" role="tabpanel" aria-labelledby="tab-cooldowns" hidden>
+  <section class="bay cooldowns">
+    <header class="bay-head">
+      <h2>Cooldowns</h2>
+      <span class="progress" id="cooldowns-progress"></span>
+      <div class="bay-actions">
+        <button type="button" class="icon-btn" data-action="cooldown-new" title="Add cooldown" aria-label="Add cooldown">
+          <span class="material-symbols-outlined">add</span></button>
+      </div>
+    </header>
+    <ul class="tasks" id="cooldowns"></ul>
+  </section>
+  <p class="muted hint">These refill on their own timers, not the daily reset. Claiming empties one; you can claim any time.</p>
+</div>
+
+<dialog id="task-dialog">
+  <form id="task-form" class="stack">
+    <h2 id="task-dialog-title">Add task</h2>
+    <label>Title
+      <input name="title" required maxlength="200" autocomplete="off">
+    </label>
+    <label>Repeats
+      <select name="kind">
+        <option value="once">Once</option>
+        <option value="daily">Daily</option>
+        <option value="weekly">Weekly</option>
+        <option value="days_of_week">On specific days</option>
+        <option value="interval">Every N days</option>
+        <option value="windows">At set times (daily windows)</option>
+      </select>
+    </label>
+    <label class="when-weekly">Resets on
+      <select name="weekday">
+        <option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option>
+        <option value="3">Thursday</option><option value="4">Friday</option><option value="5">Saturday</option>
+        <option value="6">Sunday</option>
+      </select>
+    </label>
+    <fieldset class="when-days days">
+      <legend>Active on</legend>
+      <label><input type="checkbox" name="days" value="0">Mon</label>
+      <label><input type="checkbox" name="days" value="1">Tue</label>
+      <label><input type="checkbox" name="days" value="2">Wed</label>
+      <label><input type="checkbox" name="days" value="3">Thu</label>
+      <label><input type="checkbox" name="days" value="4">Fri</label>
+      <label><input type="checkbox" name="days" value="5">Sat</label>
+      <label><input type="checkbox" name="days" value="6">Sun</label>
+    </fieldset>
+    <small class="when-weekly muted">Active days are optional: leave them all unticked if it's available all week,
+      or untick a break/tally day (e.g. resets Mon, active Mon–Sat).</small>
+    <div class="when-interval row">
+      <label>Repeat every
+        <span class="with-suffix"><input type="number" name="every" min="2" max="365" value="3"> days</span>
+      </label>
+      <label>Resets on
+        <span class="with-suffix">
+          <input type="date" name="anchor">
+          <button type="button" class="icon-btn step" data-nudge="-1" title="One day earlier" aria-label="One day earlier">
+            <span class="material-symbols-outlined">remove</span></button>
+          <button type="button" class="icon-btn step" data-nudge="1" title="One day later" aria-label="One day later">
+            <span class="material-symbols-outlined">add</span></button>
+        </span>
+      </label>
+    </div>
+    <small class="when-interval muted">Pick any day it resets (at the daily reset); it then repeats every N days from there.</small>
+    <fieldset class="when-windows windows">
+      <legend>Open during (<span class="reset-tz">KST</span>, every day)</legend>
+      <ol id="window-rows"></ol>
+      <button type="button" id="window-add"><span class="material-symbols-outlined" aria-hidden="true">add</span>Add window</button>
+      <small class="muted">Claimable once per window; it's closed in between. A window that ends at midnight ends at
+        00:00. Split one that crosses midnight into two. “Add window” repeats the gap between the last two rows.</small>
+    </fieldset>
+    <p id="reset-preview" class="reset-preview" hidden aria-live="polite">
+      <span class="material-symbols-outlined" aria-hidden="true">restart_alt</span>
+      <span class="label"></span> <b class="countdown" data-fixed="1"></b> <span class="muted when"></span>
+    </p>
+    <details class="more-options" id="task-more">
+      <summary>Counter &amp; tags <span class="muted" id="task-more-summary"></span></summary>
+      <div class="stack">
+        <label>Counter <span class="muted">(optional)</span>
+          <input type="number" name="target" min="0" max="1000" placeholder="e.g. 5 for five ads">
+          <small class="muted">For things you do several times per reset. Leave it blank for a simple checkbox.
+            Up to 10 shows numbered dots, more shows a slider.</small>
+        </label>
+        <label>Tags <span class="muted">(optional)</span>
+          <input name="categories" placeholder="comma separated, e.g. ads, guild" autocomplete="off">
+        </label>
+      </div>
+    </details>
+    <p class="form-error" role="alert" hidden></p>
+    <menu class="row end">
+      <button type="button" id="task-cancel">Cancel</button>
+      <button class="primary">Save</button>
+    </menu>
+  </form>
+</dialog>
+
+<dialog id="cooldown-dialog">
+  <form id="cooldown-form" class="stack">
+    <h2 id="cooldown-dialog-title">Add cooldown</h2>
+    <label>Title
+      <input name="title" required maxlength="200" autocomplete="off">
+    </label>
+    <fieldset>
+      <legend>Refills one every</legend>
+      <div class="row">
+        <label>Hours <input type="number" name="hours" min="0" max="720" value="8"></label>
+        <label>Minutes <input type="number" name="minutes" min="0" max="59" value="0"></label>
+      </div>
+    </fieldset>
+    <label>Holds up to
+      <input type="number" name="capacity" min="1" max="1000" value="1">
+      <small class="muted">1 = a plain cooldown: claim, then wait. More = it refills one at a time up to this
+        many, and claiming takes them all.</small>
+    </label>
+    <label>Current value
+      <input type="number" name="current" min="0" max="1" value="0">
+      <small class="muted">How many it holds right now, from 0 up to “Holds up to”. Changing it restarts
+        the wait for the next one, unless you set how far along it is below.</small>
+    </label>
+    <fieldset class="progress-field">
+      <legend>Next one (optional)</legend>
+      <div class="row">
+        <label>Enter
+          <select name="progress_kind">
+            <option value="">Leave as is</option>
+            <option value="remaining">Time left</option>
+            <option value="elapsed">Time passed</option>
+          </select>
+        </label>
+        <label class="when-progress">Hours <input type="number" name="p_hours" min="0" max="720" value="0"></label>
+        <label class="when-progress">Minutes <input type="number" name="p_minutes" min="0" max="59" value="0"></label>
+      </div>
+      <small class="muted">Copy it from the game, e.g. “ready in 3h 10m” is 3h 10m left. It must be less than
+        the refill time. <span id="progress-now"></span></small>
+    </fieldset>
+    <p class="form-error" role="alert" hidden></p>
+    <menu class="row end">
+      <button type="button" id="cooldown-cancel">Cancel</button>
+      <button class="primary">Save</button>
+    </menu>
+  </form>
+</dialog>
+
+<dialog id="browse-dialog" aria-labelledby="browse-title">
+  <form id="browse-form" class="stack">
+    <h2 id="browse-title">Add from the preset</h2>
+    <p class="muted">Everything the preset has that your list doesn't, including things you hid from Suggested.
+      Tick what you want.</p>
+    <div id="browse-list" aria-live="polite"></div>
+    <p class="form-error" role="alert" hidden></p>
+    <menu class="row end">
+      <button type="button" id="browse-all">Select all</button>
+      <button type="button" id="browse-cancel">Cancel</button>
+      <button class="primary" id="browse-import" disabled>Import</button>
+    </menu>
+  </form>
+</dialog>
+
+<div id="toast" role="status" hidden></div>
+
+<script id="initial-view" type="application/json">{{ initial_view|tojson }}</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+<script src="{{ url_for('todo.static', filename='app.js', v=asset_v) }}"></script>
+{% endblock %}
