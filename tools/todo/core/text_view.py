@@ -26,6 +26,8 @@ def _task_line(t: dict[str, Any], now: datetime, indent: str) -> list[str]:
         notes.append("opted out")
     if not t["active"]:
         notes.append("closed" if t["window"] else "not today")
+    if t["fresh"]:
+        notes.append("AVAILABLE AGAIN")
     if t["resets_at"]:
         notes.append(f"resets in {_until(t['resets_at'], now)}")
     if t["window"] and not t["done"]:
@@ -56,6 +58,10 @@ def render_text(view: dict[str, Any]) -> str:
         lines += ["", f"Bay {i} · {b['name']}  ({p['done']}/{p['total']})  id={b['id']}"]
         for t in b["tasks"] + b["opted_out"]:
             lines += _task_line(t, now, "  ")
+    lines += ["", f"Timers  ({view['countdowns_over']}/{len(view['countdowns'])} over)"]
+    for c in view["countdowns"]:
+        state = "[OVER]" if c["over"] else f"[{_until(c['ends_at'], now)}]"
+        lines.append(f"  {state} {c['title']}  (set for {c['seconds'] // 60} min)  id={c['id']}")
     lines += ["", f"Cooldowns  ({view['cooldowns_full']}/{len(view['cooldowns'])} full)"]
     for c in view["cooldowns"]:
         box = f"[{c['level']}/{c['capacity']}]"

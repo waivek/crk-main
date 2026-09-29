@@ -99,6 +99,13 @@ def test_robot_routes(app):
     assert all(t["title"] != "Robot task" for t in v["bays"][0]["tasks"])
     assert c.post("/todo/robot/api/undo").get_json()["can_redo"]
     assert c.post("/todo/robot/api/command", json={"type": "bogus"}).status_code == 400
+    # a standalone timer survives the round trip through SQLite
+    v = c.post("/todo/robot/api/command", json={"type": "add_countdown", "title": "Bell", "seconds": 600}).get_json()
+    [timer] = [t for t in v["countdowns"] if t["title"] == "Bell"]
+    assert timer["remaining_seconds"] in (599, 600) and not timer["over"]
+    assert any(t["id"] == timer["id"] for t in c.get("/todo/robot/api/view").get_json()["countdowns"])
+    v = c.get("/todo/robot/api/view?hide_tag=Weekly&hide_tag=nope").get_json()
+    assert v["hidden_tags"] == ["nope", "Weekly"] and "hidden_tagged" in v["bays"][0]
 
     assert c.get("/todo/debug/robot.json?now=bad").status_code == 400
     assert c.get("/todo/debug/robot.json?now=2099-01-01T00:00:00Z").get_json()["now"].startswith("2099")

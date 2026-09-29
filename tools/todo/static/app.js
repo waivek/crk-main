@@ -1,6 +1,13 @@
-// Thin client: renders the server's view model and sends commands. No business logic here.
+// Thin client: renders the server's view model and sends commands. No business logic here; the
+// client-side rules it needs (parsing, filter state, form checks) are pure functions in logic.js.
 $(function () {
   "use strict";
+  const {
+    esc, fmtDuration, fmtTimeLeft, parseWhen, refillFraction, timerFields, splitTimeLeft,
+    NO_FILTERS, tagState, toggleOnlyTag, toggleHideTag, filterSummary, viewQuery: buildViewQuery, hiddenNote,
+    splitTags, counterTarget, moreSummary, minutesToHhmm, windowRange, nextWindow, recurrence: buildRecurrence,
+    cooldownFields,
+  } = window.TodoLogic;
 
   const BASE = $('meta[name="todo-base"]').attr("content");
   const API = $('meta[name="todo-api"]').attr("content");
@@ -8,16 +15,30 @@ $(function () {
   const dialog = document.getElementById("task-dialog");
   const $form = $("#task-form");
   const cooldownDialog = document.getElementById("cooldown-dialog");
+  const timerDialog = document.getElementById("timer-dialog");
   const browseDialog = document.getElementById("browse-dialog");
   const $cooldownForm = $("#cooldown-form");
 
   let view = null;
   let clockOffset = 0;   // server clock minus client clock, in ms
-  let filter = null;     // selected category
+  // Tag filters: { filter: the one #tag to show only, hidden: #tags to leave out } (see logic.js).
+  let filters = NO_FILTERS;
   // "Hide done": remembered per browser (a convenience; the page works without storage).
   const HIDE_DONE_KEY = "todo.hideDone";
   let hideDone = false;
   try { hideDone = localStorage.getItem(HIDE_DONE_KEY) === "1"; } catch { /* storage blocked */ }
+  // Hidden #tags are remembered per browser too (the one "show only" tag isn't).
+  const HIDDEN_TAGS_KEY = "todo.hiddenTags";
+  try {
+    const saved = JSON.parse(localStorage.getItem(HIDDEN_TAGS_KEY));
+    if (Array.isArray(saved)) filters.hidden = saved.filter((t) => typeof t === "string");
+  } catch { /* storage blocked or unreadable */ }
+  function setFilters(next) {
+    filters = next;
+    try { localStorage.setItem(HIDDEN_TAGS_KEY, JSON.stringify(filters.hidden)); } catch { /* storage blocked */ }
+    renderFilters(); // update the chips right away; the narrowed view follows
+    refresh();
+  }
   // Groups the user opened/closed by hand: id -> {open, done}. A choice only sticks while the
   // group's done state is unchanged, so finishing a group collapses it again.
   const groupChoice = new Map();
@@ -26,7 +47,6 @@ $(function () {
 
   // --- helpers -----------------------------------------------------------------------
 
-  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   const RECUR_ICONS = {
     once: "looks_one", daily: "today", weekly: "date_range",
     days_of_week: "calendar_view_week", interval: "event_repeat", windows: "schedule",
@@ -37,61 +57,10 @@ $(function () {
   const menuItem = (action, name, label, cls = "") =>
     `<button type="button" class="${cls}" data-action="${action}">${icon(name)}${label}</button>`;
 
-  function findTask(id) {
-    const search = (tasks) => {
-      for (const t of tasks) {
-        if (t.id === id) return t;
-        const found = search(t.subtasks);
-        if (found) return found;
-      }
-      return null;
-    };
-    for (const b of view.bays) {
-      const found = search(b.tasks.concat(b.opted_out));
-      if (found) return found;
-    }
-    return null;
-  }
-
-  function fmtDuration(ms) {
-    let s = Math.ceil(ms / 1000);
-    const d = Math.floor(s / 86400); s %= 86400;
-    const h = Math.floor(s / 3600); s %= 3600;
-    const m = Math.floor(s / 60); s %= 60;
-    const pad = (n) => String(n).padStart(2, "0");
-    if (d) return `${d}d ${h}h ${pad(m)}m ${pad(s)}s`;
-    if (h) return `${h}h ${pad(m)}m ${pad(s)}s`;
-    if (m) return `${m}m ${pad(s)}s`;
-    return `${s}s`;
-  }
+  const findTask = (id) => window.TodoLogic.findTask(view.bays, id);
 
   const fmtWhen = (iso) =>
     new Date(iso).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
-
-  // "10" / "10m" -> minutes, "2h", "90s", "1:30" (h:mm). Returns seconds or null.
-  function parseDuration(text) {
-    const s = (text || "").trim().toLowerCase();
-    let m;
-    if ((m = s.match(/^(\d+)\s*(m|min)?$/))) return +m[1] * 60;
-    if ((m = s.match(/^(\d+)\s*h$/))) return +m[1] * 3600;
-    if ((m = s.match(/^(\d+)\s*s$/))) return +m[1];
-    if ((m = s.match(/^(\d+):(\d{2})$/))) return +m[1] * 3600 + +m[2] * 60;
-    return null;
-  }
-
-  // "+30" / "30m" / "2h" from now, or "18:30" local time (today, else tomorrow). Returns Date or null.
-  function parseWhen(text) {
-    const s = (text || "").trim();
-    let m;
-    if ((m = s.match(/^(\d{1,2}):(\d{2})$/))) {
-      const d = new Date();
-      d.setHours(+m[1], +m[2], 0, 0);
-      if (d <= new Date()) d.setDate(d.getDate() + 1);
-      return d;
-    }
-    const secs = parseDuration(s.replace(/^\+/, ""));
-    return secs ? new Date(Date.now() + secs * 1000) : null;
-  }
 
   function toast(msg) {
     const $t = $("#toast").text(msg).prop("hidden", false);
@@ -145,14 +114,8 @@ $(function () {
       });
   }
 
-  // The server narrows the view (core/view.py filter_view): by #tag, and/or to unfinished tasks.
-  function viewQuery() {
-    const q = new URLSearchParams();
-    if (filter) q.set("category", filter);
-    if (hideDone) q.set("hide_done", "1");
-    const s = q.toString();
-    return s ? "?" + s : "";
-  }
+  // The server narrows the view (core/view.py filter_view): hidden #tags, one #tag, unfinished tasks.
+  const viewQuery = () => buildViewQuery({ ...filters, hideDone });
 
   const send = (payload) => api("POST", "command", payload);
   const refresh = () => api("GET", "view");
@@ -189,15 +152,30 @@ $(function () {
         </li>`).join("")}</ul>` : "");
   }
 
+  // Filter bar: Hide done, All, one chip per tag, and a line saying what's filtered.
   function renderFilters() {
-    const chip = (cat, labelHtml, cls = "") =>
-      `<button type="button" class="chip ${cls}" data-filter="${esc(cat)}" aria-pressed="${filter === cat || (!filter && cat === "")}">${labelHtml}</button>`;
+    const all = `<button type="button" class="chip" data-filters-clear aria-pressed="${!filters.filter && !filters.hidden.length}"
+      title="Show every tag">All</button>`;
+    // Each tag: its name toggles "only this tag"; the eye hides or shows it. Two buttons, one job each.
+    const tagChip = (c) => {
+      const state = tagState(filters, c);
+      const name = state === "only" ? `Stop showing only #${c}` : `Show only #${c}`;
+      const eye = state === "hidden" ? `Show #${c} again` : `Hide #${c}`;
+      return `<span class="chip tag tag-split ${state}" role="group" aria-label="#${esc(c)}">
+        <button type="button" class="tag-name" data-filter="${esc(c)}" aria-pressed="${state === "only"}" title="${esc(name)}">${icon("sell")}<span class="name">${esc(c)}</span></button>
+        <button type="button" class="tag-eye" data-tag-hide="${esc(c)}" aria-pressed="${state === "hidden"}" title="${esc(eye)}" aria-label="${esc(eye)}">${icon(state === "hidden" ? "visibility_off" : "visibility")}</button>
+      </span>`;
+    };
+    const summary = filterSummary(filters, view.categories);
+    const status = summary
+      ? `<p class="filter-status">${icon("filter_alt")}<span>${esc(summary)}</span><button type="button" class="link" data-filters-clear>Show all</button></p>`
+      : "";
     const toggle = `<button type="button" class="chip hide-done" id="hide-done" aria-pressed="${hideDone}"
       title="Show only what's left to do">${icon(hideDone ? "check_box" : "check_box_outline_blank")}Hide done</button>`;
     const tags = view.categories.length
-      ? `<span class="filter-sep" aria-hidden="true"></span>` + chip("", "All") + view.categories.map((c) => chip(c, icon("sell") + esc(c), "tag")).join("")
+      ? `<span class="filter-sep" aria-hidden="true"></span>` + all + view.categories.map(tagChip).join("")
       : "";
-    $("#filters").html(toggle + tags);
+    $("#filters").html(toggle + tags + status);
   }
 
   // The server already narrowed the view to the selected #tag (see core/view.py filter_view).
@@ -207,12 +185,14 @@ $(function () {
     const last = b.position === view.bay_count - 1;
     const tasks = b.tasks;
     const off = b.opted_out;
+    const fresh = tasks.filter((t) => t.fresh).length;
     return `
       <section class="bay" data-bay="${esc(b.id)}" style="view-transition-name: b-${esc(b.id)}">
         <header class="bay-head">
           <span class="bay-num">Bay ${b.position + 1}</span>
           <h2>${esc(b.name)}</h2>
           <span class="progress">${b.progress.done}/${b.progress.total}</span>
+          ${fresh ? `<span class="chip fresh" title="Reset today after a longer wait">${icon("new_releases")}${fresh}<span class="label">&nbsp;available again</span></span>` : ""}
           <div class="bay-actions">
             ${iconBtn("bay-up", "arrow_upward", "Move bay up", first, "hide-narrow")}
             ${iconBtn("bay-down", "arrow_downward", "Move bay down", last, "hide-narrow")}
@@ -231,21 +211,29 @@ $(function () {
           </div>
         </header>
         <ul class="tasks">${tasks.map(renderTask).join("")}</ul>
-        ${b.hidden_done ? `<p class="hidden-done">${icon("done_all")}${tasks.length ? "" : "All done · "}${b.hidden_done} done hidden</p>` : ""}
+        ${hiddenNoteHtml(b)}
         ${off.length ? `<details class="opted-out"><summary>Opted out (${off.length})</summary><ul class="tasks">${off.map(renderTask).join("")}</ul></details>` : ""}
       </section>`;
+  }
+
+  // What the filters left out of this bay: "All done · 3 done hidden · 2 hidden by tag".
+  function hiddenNoteHtml(b) {
+    const note = hiddenNote(b);
+    return note ? `<p class="hidden-done">${icon(note.icon)}${esc(note.text)}</p>` : "";
   }
 
   function renderTask(t) {
     const isParent = t.is_group;
     const choice = groupChoice.get(t.id);
     const collapsed = choice && choice.done === t.done ? !choice.open : t.collapsed;
-    const cls = ["task", t.done && "done", !t.active && "inactive", !t.enabled && "off", t.reminder_due && "due"]
+    const cls = ["task", t.done && "done", !t.active && "inactive", !t.enabled && "off", t.reminder_due && "due", t.fresh && "fresh"]
       .filter(Boolean).join(" ");
     const meta = [
       isParent
         ? `<span class="chip">${t.subtask_progress.done}/${t.subtask_progress.total}</span>`
         : `<span class="chip recur"${t.window ? ` title="${esc(t.window.times.join(", "))} ${esc(view.reset_tz)}"` : ""}>${icon(RECUR_ICONS[t.recurrence.kind] || "repeat")}${esc(t.recurrence_label)}</span>`,
+      // Reset today after a longer wait (e.g. a shop restocked); the server drops it at the next reset.
+      t.fresh && !isParent ? `<span class="chip fresh" title="Reset today; this shows until the next daily reset">${icon("new_releases")}Available again</span>` : "",
       windowChip(t),
       t.resets_at ? `<span class="chip">${icon("autorenew")}Resets <span class="countdown" data-until="${t.resets_at}" data-refresh="1"></span></span>` : "",
       t.timer ? `<span class="chip timer">${icon("timer")}Ends <span class="countdown" data-until="${t.timer.ends_at}" data-done="now: time’s up"></span></span>` : "",
@@ -270,7 +258,7 @@ $(function () {
             ${menuItem("edit", "edit", "Edit")}
             ${t.parent_id ? "" : menuItem("subtask-new", "subdirectory_arrow_right", "Add subtask")}
             ${menuItem("duplicate", "content_copy", "Duplicate")}
-            ${t.timer ? menuItem("timer-stop", "timer_off", "Stop timer") : menuItem("timer", "timer", "Start timer")}
+            ${t.timer ? menuItem("timer-stop", "timer_off", "Stop timer") : ""}
             ${t.reminder_at ? menuItem("reminder-clear", "notifications_off", "Clear reminder") : menuItem("reminder", "notifications", "Set reminder")}
             ${menuItem("toggle-enabled", t.enabled ? "visibility_off" : "visibility", t.enabled ? "Opt out" : "Opt in")}
             ${menuItem("delete", "delete", "Delete", "danger")}
@@ -319,19 +307,68 @@ $(function () {
 
   // --- cooldowns tab -----------------------------------------------------------------
 
+  // Standalone timers: soonest first; finished ones ring (and count in the tab and page title)
+  // until dismissed.
+  function renderTimers() {
+    const list = view.countdowns;
+    const over = view.countdowns_over;
+    $("#timers-progress").text(over ? `${over} up` : list.length ? `${list.length} running` : "");
+    $("#timers").html(list.map(renderTimer).join(""));
+    document.title = over ? `(${over}) Todo` : "Todo";
+  }
+
+  function renderTimer(c) {
+    const now = Date.now() + clockOffset;
+    const lead = c.over
+      ? `<button type="button" class="claim primary" data-action="timer-dismiss" title="Dismiss">${icon("done")}Done</button>`
+      : `<span class="timer-icon">${icon("timer")}</span>`;
+    const meta = [
+      c.over
+        ? `<span class="chip ringing">${icon("alarm")}Time’s up · ${esc(fmtClock(Date.parse(c.ends_at), now))}</span>`
+        : `<span class="chip">${icon("hourglass_top")}Ends <span class="countdown" data-until="${c.ends_at}" data-refresh="1"></span></span>`,
+      `<span class="chip recur" title="The length it was set to">${icon("timer")}${esc(fmtTimeLeft(c.seconds))}</span>`,
+    ].join("");
+    const bar = c.over ? "" : `
+      <div class="refill" data-until="${c.ends_at}" data-span="${c.seconds * 1000}" role="progressbar"
+        aria-label="Time passed" aria-valuemin="0" aria-valuemax="100">
+        <span style="inline-size: ${(refillAt(c.ends_at, c.seconds * 1000) * 100).toFixed(2)}%"></span></div>`;
+    return `
+      <li class="task countdown-row${c.over ? " over" : ""}" data-countdown="${esc(c.id)}" style="view-transition-name: d-${esc(c.id)}">
+        <div class="task-row">
+        ${lead}
+        <div class="body"><span class="title">${esc(c.title)}</span><div class="meta">${meta}</div>${bar}</div>
+        <div class="quick">
+          ${iconBtn("timer-restart", "replay", `Restart: ${fmtTimeLeft(c.seconds)} from now`)}
+        </div>
+        <details class="menu">
+          <summary aria-label="More actions">${icon("more_vert")}</summary>
+          <div class="menu-items">
+            ${menuItem("timer-edit", "edit", "Edit")}
+            ${menuItem("timer-restart", "replay", "Restart")}
+            ${menuItem("timer-dismiss", "delete", c.over ? "Dismiss" : "Delete", "danger")}
+          </div>
+        </details>
+        </div>
+      </li>`;
+  }
+
   function renderCooldowns() {
+    if (view.countdowns) renderTimers();
     const list = view.cooldowns;
-    $("#cooldowns-full").text(view.cooldowns_full).prop("hidden", !view.cooldowns_full);
+    // One badge on the tab: timers that are up plus cooldowns that are full (yellow if a timer is up).
+    const over = view.countdowns ? view.countdowns_over : 0;
+    const ready = over + view.cooldowns_full;
+    $("#timers-ready").text(ready).prop("hidden", !ready).toggleClass("ringing", over > 0)
+      .attr("title", `${over} timer${over === 1 ? "" : "s"} up · ${view.cooldowns_full} cooldown${view.cooldowns_full === 1 ? "" : "s"} full`);
     $("#cooldowns-progress").text(list.length ? `${view.cooldowns_full}/${list.length} full` : "");
     $("#cooldowns").html(list.map(renderCooldown).join(""));
   }
 
   // Still refilling: a bar that fills up towards the next one (kept moving by tick()).
-  const refillFraction = (untilIso, spanMs) =>
-    Math.min(1, Math.max(0, 1 - (Date.parse(untilIso) - (Date.now() + clockOffset)) / spanMs));
+  const refillAt = (untilIso, spanMs) => refillFraction(Date.parse(untilIso), spanMs, Date.now() + clockOffset);
   function refillBar(c) {
     if (c.full) return "";
-    const pct = (refillFraction(c.next_at, c.minutes * 60000) * 100).toFixed(2);
+    const pct = (refillAt(c.next_at, c.minutes * 60000) * 100).toFixed(2);
     return `
       <div class="refill" data-until="${c.next_at}" data-span="${c.minutes * 60000}" role="progressbar"
         aria-label="Refilling the next one" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(pct)}">
@@ -401,19 +438,20 @@ $(function () {
   $cooldownForm.on("submit", function (e) {
     e.preventDefault();
     const f = this;
-    const minutes = (+f.elements.hours.value || 0) * 60 + (+f.elements.minutes.value || 0);
-    if (minutes <= 0) return $cooldownForm.find(".form-error").text("The refill time must be longer than 0 minutes.").prop("hidden", false);
-    const fields = {
-      title: f.elements.title.value,
-      minutes,
-      capacity: Math.floor(+f.elements.capacity.value || 0),
-      value: Math.floor(+f.elements.current.value || 0),
-    };
-    const kind = f.elements.progress_kind.value;
-    if (kind) {
-      const progress = (+f.elements.p_hours.value || 0) * 60 + (+f.elements.p_minutes.value || 0);
-      if (progress >= minutes) return $cooldownForm.find(".form-error").text("The time left or passed must be less than the refill time.").prop("hidden", false);
-      fields.progress = { [kind]: progress };
+    let fields;
+    try {
+      fields = cooldownFields({
+        title: f.elements.title.value,
+        hours: f.elements.hours.value,
+        minutes: f.elements.minutes.value,
+        capacity: f.elements.capacity.value,
+        current: f.elements.current.value,
+        progressKind: f.elements.progress_kind.value,
+        progressHours: f.elements.p_hours.value,
+        progressMinutes: f.elements.p_minutes.value,
+      });
+    } catch (err) {
+      return $cooldownForm.find(".form-error").text(err.message).prop("hidden", false);
     }
     const payload = editingCooldown
       ? { type: "edit_cooldown", cooldown_id: editingCooldown.id, ...fields }
@@ -429,6 +467,101 @@ $(function () {
     f.elements.current.max = Math.max(1, Math.floor(+f.elements.capacity.value || 1));
   }
   $cooldownForm.on("input change", '[name="capacity"]', syncValueMax);
+
+  // --- timers ------------------------------------------------------------------------
+
+  // Quick add: a name and the time left, Enter to start.
+  $("#timer-add").on("submit", function (e) {
+    e.preventDefault();
+    const f = this;
+    const $err = $(f).find(".form-error");
+    let fields;
+    try {
+      fields = timerFields(f.elements.title.value, f.elements.hours.value, f.elements.minutes.value);
+    } catch (err) {
+      return $err.text(err.message).prop("hidden", false);
+    }
+    $err.prop("hidden", true);
+    send({ type: "add_countdown", ...fields }).done(() => {
+      f.reset();
+      f.elements.title.focus();
+    });
+  });
+  $("#timer-add").on("input", () => $("#timer-add .form-error").prop("hidden", true));
+
+  // Hours and minutes fields: a dropdown of common values (1–12 h, 15/30/45 min) while the field has
+  // focus. Pressing an option doesn't take focus from the field, so the list doesn't vanish mid-tap
+  // (iOS doesn't focus buttons).
+  const timeMenu = (input) => $(input).closest(".time-picker").find(".time-menu");
+  $(document)
+    .on("focus click", ".time-picker input", function () { timeMenu(this).prop("hidden", false); })
+    .on("blur", ".time-picker input", function () { timeMenu(this).prop("hidden", true); })
+    .on("keydown", ".time-picker input", function (e) {
+      if (e.key === "Escape" && !timeMenu(this).prop("hidden")) {
+        e.preventDefault(); // close the list, not the dialog
+        timeMenu(this).prop("hidden", true);
+      }
+    })
+    .on("mousedown pointerdown", ".time-menu button", (e) => e.preventDefault())
+    .on("click", ".time-menu button", function () {
+      const input = $(this).closest(".time-picker").find("input")[0];
+      input.value = this.dataset.value;
+      $(input).trigger("input");
+      $(this).closest(".time-menu").prop("hidden", true);
+      input.blur(); // done with it: on a phone this also drops the keyboard
+    });
+
+  let editingTimer = null;
+  let timeShown = "";  // the hours/minutes the dialog pre-filled: left untouched, the timer runs on as it is
+  const timeFieldsOf = (f) => `${f.elements.hours.value}:${f.elements.minutes.value}`;
+  function openTimerDialog(c) {
+    editingTimer = c;
+    const f = $("#timer-form")[0];
+    f.elements.title.value = c.title;
+    // A finished one starts blank, with its last length as a hint. So does one with more than 23h
+    // left (only possible through the API), which the fields can't hold; blank keeps it as it is.
+    const left = splitTimeLeft(c.over ? 0 : (Date.parse(c.ends_at) - (Date.now() + clockOffset)) / 1000);
+    const blank = c.over || left.hours > 23;
+    const hint = splitTimeLeft(c.seconds);
+    f.elements.hours.value = blank ? "" : left.hours;
+    f.elements.minutes.value = blank ? "" : left.minutes;
+    f.elements.hours.placeholder = blank ? Math.min(hint.hours, 23) : "";
+    f.elements.minutes.placeholder = blank ? hint.minutes : "";
+    timeShown = timeFieldsOf(f);
+    $("#timer-form .form-error").prop("hidden", true);
+    timerDialog.showModal();
+    f.elements.hours.focus();
+  }
+
+  $("#timer-form").on("submit", function (e) {
+    e.preventDefault();
+    const f = this;
+    const changed = timeFieldsOf(f) !== timeShown && timeFieldsOf(f) !== ":";
+    const payload = { type: "edit_countdown", countdown_id: editingTimer.id, title: f.elements.title.value.trim() };
+    try {
+      // Untouched (or both cleared), the time left stays as it is.
+      if (changed) Object.assign(payload, timerFields(payload.title, f.elements.hours.value, f.elements.minutes.value));
+      else if (!payload.title) throw new Error("Name the timer, e.g. Mine Venture.");
+    } catch (err) {
+      return $("#timer-form .form-error").text(err.message).prop("hidden", false);
+    }
+    send(payload).done(() => timerDialog.close());
+  });
+  $("#timer-cancel").on("click", () => timerDialog.close());
+
+  $("#panel-cooldowns").on("click", "[data-countdown] [data-action]", function () {
+    const rowEl = this.closest("[data-countdown]");
+    const c = view.countdowns.find((x) => x.id === rowEl.dataset.countdown);
+    if (!c) return;
+    $(this).closest(".menu").removeAttr("open");
+    switch (this.dataset.action) {
+      case "timer-dismiss":
+        markPending(this, rowEl);
+        return send({ type: "remove_countdown", countdown_id: c.id });
+      case "timer-restart": return send({ type: "restart_countdown", countdown_id: c.id });
+      case "timer-edit": return openTimerDialog(c);
+    }
+  });
 
   $("#panel-cooldowns").on("click", function (e) {
     const actionEl = e.target.closest("[data-action]");
@@ -520,7 +653,7 @@ $(function () {
       .always(updateBrowseButtons);
   });
 
-  // --- tabs (the open one is kept in the URL hash, e.g. …/todo/#cooldowns) -------------
+  // --- tabs (the open one is kept in the URL hash, e.g. …/todo/#timers) ----------------
 
   function showTab(name) {
     $("[role=tab]").each(function () {
@@ -532,7 +665,7 @@ $(function () {
   }
 
   $(".tabs").on("click", "[role=tab]", function () { showTab(this.dataset.tab); });
-  showTab(location.hash === "#cooldowns" ? "cooldowns" : "tasks");
+  showTab(["#timers", "#cooldowns"].includes(location.hash) ? "timers" : "tasks"); // #cooldowns: old links
 
   // --- countdowns --------------------------------------------------------------------
 
@@ -570,7 +703,7 @@ $(function () {
     const now = Date.now() + clockOffset;
     let needsRefresh = false;
     $(".refill").each(function () {
-      const frac = refillFraction(this.dataset.until, +this.dataset.span);
+      const frac = refillAt(this.dataset.until, +this.dataset.span);
       this.firstElementChild.style.inlineSize = `${(frac * 100).toFixed(2)}%`;
       this.setAttribute("aria-valuenow", Math.round(frac * 100));
     });
@@ -611,7 +744,7 @@ $(function () {
     $("#task-dialog-title").text(t ? "Edit task" : opts.parentId ? `Add subtask to “${findTask(opts.parentId).title}”` : "Add task");
     f.reset();
     f.elements.title.value = t ? t.title : "";
-    f.elements.categories.value = t ? t.categories.join(", ") : (filter || "");
+    f.elements.categories.value = t ? t.categories.join(", ") : (filters.filter || "");
     f.elements.kind.value = r.kind;
     f.elements.weekday.value = String(r.weekday ?? 0);
     $form.find('[name="days"]').each(function () { this.checked = (r.days || []).includes(+this.value); });
@@ -630,40 +763,16 @@ $(function () {
     f.elements.title.focus();
   }
 
-  const checkedDays = () => $form.find('[name="days"]:checked').map(function () { return +this.value; }).get();
-
+  // The repeat the dialog describes (logic.js checks it); throws an Error with a message.
   function readRecurrence(f) {
-    const kind = f.elements.kind.value;
-    switch (kind) {
-      case "weekly": {
-        const days = checkedDays();
-        const weekday = +f.elements.weekday.value;
-        return days.length && days.length < 7 ? { kind, weekday, days } : { kind, weekday };
-      }
-      case "days_of_week": {
-        const days = checkedDays();
-        if (!days.length) throw new Error("Pick at least one day.");
-        return { kind, days };
-      }
-      case "windows": {
-        const windows = $("#window-rows li").map(function () {
-          const start = hhmmToMinutes($(this).find('[data-w="start"]').val());
-          const end = hhmmToMinutes($(this).find('[data-w="end"]').val());
-          if (start === null || end === null) throw new Error("Fill in every window's times (or remove the row).");
-          return [[start, end === 0 ? 24 * 60 : end]]; // ending at 00:00 means midnight at the end of the day
-        }).get();
-        if (!windows.length) throw new Error("Add at least one window.");
-        return { kind, windows };
-      }
-      case "interval": {
-        const every = Math.floor(+f.elements.every.value || 0);
-        if (every < 2) throw new Error("Every N days needs N of at least 2.");
-        if (!f.elements.anchor.value) throw new Error("Pick a day it resets.");
-        return { kind, every, anchor: f.elements.anchor.value };
-      }
-      default:
-        return { kind };
-    }
+    return buildRecurrence({
+      kind: f.elements.kind.value,
+      weekday: f.elements.weekday.value,
+      days: $form.find('[name="days"]:checked').map(function () { return +this.value; }).get(),
+      windows: windowTexts(),
+      every: f.elements.every.value,
+      anchor: f.elements.anchor.value,
+    });
   }
 
   $form.on("submit", function (e) {
@@ -677,8 +786,8 @@ $(function () {
     }
     const fields = {
       title: f.elements.title.value,
-      categories: f.elements.categories.value.split(",").map((s) => s.trim()).filter(Boolean),
-      target: Math.floor(+f.elements.target.value || 0) >= 2 ? Math.floor(+f.elements.target.value) : 0, // blank = checkbox
+      categories: splitTags(f.elements.categories.value),
+      target: counterTarget(f.elements.target.value), // blank = checkbox
       recurrence,
     };
     const payload = editing.task
@@ -692,10 +801,7 @@ $(function () {
   // What's set under the collapsed "Counter & tags", e.g. "· ×5 · #ads".
   function updateMoreSummary() {
     const f = $form[0];
-    const n = Math.floor(+f.elements.target.value || 0);
-    const tags = f.elements.categories.value.split(",").map((s) => s.trim()).filter(Boolean);
-    const parts = [n >= 2 ? `×${n}` : "", ...tags.map((c) => "#" + c)].filter(Boolean);
-    $("#task-more-summary").text(parts.length ? "· " + parts.join(" · ") : "");
+    $("#task-more-summary").text(moreSummary(f.elements.target.value, f.elements.categories.value));
   }
   $form.on("input", '[name="target"], [name="categories"]', updateMoreSummary);
 
@@ -704,12 +810,10 @@ $(function () {
 
   // --- daily windows editor (times are minutes after the daily reset, shown as HH:MM) ----------
 
-  const DAY_MIN = 24 * 60;
-  const minutesToHhmm = (m) => `${String(Math.floor((m % DAY_MIN) / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-  function hhmmToMinutes(s) {
-    const m = /^(\d{2}):(\d{2})$/.exec(s || "");
-    return m ? +m[1] * 60 + +m[2] : null;
-  }
+  // Each row's [opens, closes] as typed, e.g. ["00:00", "12:00"].
+  const windowTexts = () => $("#window-rows li").map(function () {
+    return [[$(this).find('[data-w="start"]').val(), $(this).find('[data-w="end"]').val()]];
+  }).get();
 
   function addWindowRow(start, end) {
     $("#window-rows").append(`
@@ -721,21 +825,11 @@ $(function () {
       </li>`);
   }
 
-  // A new row repeats the pattern so far: the gap between the last two rows' openings (or, with one
-  // row, starts where it ends) and the same length as the last row. Every row stays editable.
+  // A new row repeats the pattern so far (logic.js nextWindow). Every row stays editable.
   $("#window-add").on("click", function () {
-    const rows = $("#window-rows li").map(function () {
-      const start = hhmmToMinutes($(this).find('[data-w="start"]').val());
-      const end = hhmmToMinutes($(this).find('[data-w="end"]').val());
-      return start === null || end === null ? null : [[start, end === 0 ? DAY_MIN : end]];
-    }).get();
-    const last = rows[rows.length - 1];
-    if (!last) return addWindowRow(0, 60), schedulePreview();
-    const length = last[1] - last[0];
-    const step = rows.length >= 2 ? last[0] - rows[rows.length - 2][0] : length;
-    const start = last[0] + (step > 0 ? step : length);
-    if (start >= DAY_MIN) return toast("That would pass midnight; the day's windows repeat every day anyway.");
-    addWindowRow(start, Math.min(start + length, DAY_MIN));
+    const next = nextWindow(windowTexts().map(([s, e]) => windowRange(s, e)));
+    if (!next) return toast("That would pass midnight; the day's windows repeat every day anyway.");
+    addWindowRow(...next);
     schedulePreview();
   });
 
@@ -825,12 +919,15 @@ $(function () {
     refresh();
   });
 
+  $("#filters").on("click", "[data-filters-clear]", () => setFilters(NO_FILTERS));
+  $("#filters").on("click", "[data-tag-hide]", function () {
+    setFilters(toggleHideTag(filters, this.dataset.tagHide));
+  });
+
+  // A tag's name, in the filter bar or on a task row, toggles "only this tag".
   $(document).on("click", "[data-filter]", function (e) {
     e.stopPropagation();
-    const cat = this.dataset.filter;
-    filter = cat && filter !== cat ? cat : null;
-    renderFilters(); // highlight the chip right away; the narrowed view follows
-    refresh();
+    setFilters(toggleOnlyTag(filters, this.dataset.filter));
   });
 
   // Only one kebab menu open at a time; close menus on outside click.
@@ -888,17 +985,11 @@ $(function () {
       }
       case "subtask-new": return openTaskDialog({ bayId, parentId: t.id });
       case "duplicate": return send({ type: "duplicate_task", task_id: t.id });
-      case "timer": {
-        const input = prompt("Timer length (e.g. 10, 25m, 1h, 1:30, 90s)", "10m");
-        if (input === null) return;
-        const seconds = parseDuration(input);
-        return seconds ? send({ type: "start_timer", task_id: t.id, seconds }) : toast("Couldn’t read that duration.");
-      }
       case "timer-stop": return send({ type: "stop_timer", task_id: t.id });
       case "reminder": {
         const input = prompt("Remind at (e.g. 18:30) or in (e.g. 30m, 2h)", "1h");
         if (input === null) return;
-        const at = parseWhen(input);
+        const at = parseWhen(input, new Date());
         return at ? send({ type: "set_reminder", task_id: t.id, at: at.toISOString() }) : toast("Couldn’t read that time.");
       }
       case "reminder-clear": return send({ type: "clear_reminder", task_id: t.id });
@@ -916,5 +1007,5 @@ $(function () {
   });
 
   setView(JSON.parse(document.getElementById("initial-view").textContent));
-  if (hideDone) refresh(); // the page is rendered unfiltered; narrow it to what's left
+  if (hideDone || filters.hidden.length) refresh(); // the page is rendered unfiltered; narrow it to what's left
 });

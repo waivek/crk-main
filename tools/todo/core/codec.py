@@ -7,11 +7,13 @@ from typing import Any
 
 from . import commands as c
 from . import ordering
-from .model import DAY_MINUTES, MAX_CAPACITY, MAX_COOLDOWN_MINUTES, MAX_TARGET, RECURRENCE_KINDS, Window, Bay, Cooldown, Recurrence, State, Task, Timer
+from .model import (
+    DAY_MINUTES, MAX_CAPACITY, MAX_COOLDOWN_MINUTES, MAX_TARGET, MAX_TIMER_SECONDS, RECURRENCE_KINDS, Window, Bay, Cooldown,
+    Countdown, Recurrence, State, Task, Timer,
+)
 
 MAX_TEXT = 200
 MAX_CATEGORIES = 20
-MAX_TIMER_SECONDS = 7 * 24 * 3600
 MAX_WINDOWS = 96  # e.g. a 5-minute window every 15 minutes
 
 
@@ -194,12 +196,23 @@ def cooldown_from_dict(d: dict[str, Any]) -> Cooldown:
     )
 
 
+def countdown_to_dict(c: Countdown) -> dict[str, Any]:
+    return {"id": c.id, "title": c.title, "ends_at": dt_to_str(c.ends_at), "seconds": c.seconds}
+
+
+def countdown_from_dict(d: dict[str, Any]) -> Countdown:
+    ends_at = dt_from_str(d["ends_at"])
+    assert ends_at is not None
+    return Countdown(id=d["id"], title=d["title"], ends_at=ends_at, seconds=d["seconds"])
+
+
 def state_to_dict(s: State) -> dict[str, Any]:
     return {
         "bays": [bay_to_dict(b) for b in s.bays],
         "tasks": [task_to_dict(t) for t in s.tasks],
         "dismissed": sorted(s.dismissed),
         "cooldowns": [cooldown_to_dict(x) for x in s.cooldowns],
+        "countdowns": [countdown_to_dict(x) for x in s.countdowns],
     }
 
 
@@ -210,6 +223,7 @@ def state_from_dict(d: dict[str, Any]) -> State:
         tasks=tuple(task_from_dict(t) for t in d["tasks"] if t["recurrence"].get("kind") != "cooldown"),
         dismissed=frozenset(d.get("dismissed", ())),
         cooldowns=tuple(cooldown_from_dict(x) for x in d.get("cooldowns", ())),
+        countdowns=tuple(countdown_from_dict(x) for x in d.get("countdowns", ())),  # older snapshots: none
     )
     return _adopt_legacy_cooldowns(state, legacy) if legacy else state
 
@@ -424,5 +438,17 @@ def parse_command(d: Any, fresh_id: str) -> c.Command:
             return c.Claim(_str(d, "cooldown_id"))
         case "unclaim":
             return c.Unclaim(_str(d, "cooldown_id"))
+        case "add_countdown":
+            return c.AddCountdown(fresh_id, _str(d, "title"), _int(d, "seconds", 1, MAX_TIMER_SECONDS))
+        case "edit_countdown":
+            return c.EditCountdown(
+                _str(d, "countdown_id"),
+                _optional(d, "title", _str),
+                _optional(d, "seconds", lambda d, k: _int(d, k, 1, MAX_TIMER_SECONDS)),
+            )
+        case "restart_countdown":
+            return c.RestartCountdown(_str(d, "countdown_id"))
+        case "remove_countdown":
+            return c.RemoveCountdown(_str(d, "countdown_id"))
         case other:
             raise CodecError(f"unknown command type {other!r}")

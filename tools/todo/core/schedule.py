@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
 from . import config
-from .model import Cooldown, Recurrence, State, Task, Timer, Window, is_counter, subtasks
+from .model import Cooldown, Countdown, Recurrence, State, Task, Timer, Window, is_counter, subtasks
 
 DAY = timedelta(days=1)
 WEEK = timedelta(days=7)
@@ -158,6 +158,25 @@ def item_active(state: State, task: Task, now: datetime) -> bool:
     return any(is_active(c, now) for c in children) if children else is_active(task, now)
 
 
+def is_fresh(task: Task, now: datetime) -> bool:
+    """Just came back: a repeat longer than a day (every N days, weekly) that reset at today's
+    daily reset and isn't done yet, e.g. a shop that restocked. Lasts that one game day."""
+    r = task.recurrence
+    if not (r.kind == "weekly" or (r.kind == "interval" and r.every >= 2)):
+        return False
+    if not task.enabled or is_done(task, now) or not is_active(task, now):
+        return False
+    return last_reset(task, now) == daily_reset_at_or_before(now)
+
+
+def item_fresh(state: State, task: Task, now: datetime) -> bool:
+    """A group is fresh when any of its opted-in steps is."""
+    children = enabled_subtasks(state, task)
+    if children:
+        return task.enabled and any(is_fresh(c, now) for c in children)
+    return is_fresh(task, now)
+
+
 def level(cooldown: Cooldown, now: datetime) -> int:
     """How many have refilled: one per `minutes` since it was emptied, up to capacity."""
     if cooldown.emptied_at is None:
@@ -192,6 +211,10 @@ def full_at(cooldown: Cooldown, now: datetime) -> datetime | None:
         return None
     assert cooldown.emptied_at is not None
     return cooldown.emptied_at + cooldown.capacity * timedelta(minutes=cooldown.minutes)
+
+
+def countdown_over(countdown: Countdown, now: datetime) -> bool:
+    return now >= countdown.ends_at
 
 
 def timer_ends_at(timer: Timer) -> datetime:

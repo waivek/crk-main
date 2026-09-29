@@ -68,16 +68,28 @@ class Cooldown:
 
 
 @dataclass(frozen=True)
+class Countdown:
+    """A one-off timer (a "Timer" in the UI): something in the game finishes or expires at `ends_at`,
+    e.g. a venture or a Mining Bell. Once it's over it stays, ringing, until it's dismissed."""
+    id: str
+    title: str
+    ends_at: datetime
+    seconds: int  # the length it was last set to: for the progress bar, and Restart
+
+
+@dataclass(frozen=True)
 class State:
     bays: tuple[Bay, ...] = ()
     tasks: tuple[Task, ...] = ()
     dismissed: frozenset[str] = frozenset()  # preset item ids the user hid from "Suggested"
     cooldowns: tuple[Cooldown, ...] = ()
+    countdowns: tuple[Countdown, ...] = ()
 
 
 MAX_TARGET = 1000
 MAX_COOLDOWN_MINUTES = 30 * 24 * 60
 MAX_CAPACITY = 1000
+MAX_TIMER_SECONDS = 7 * 24 * 3600
 
 
 def is_counter(task: "Task") -> bool:
@@ -107,6 +119,13 @@ def find_cooldown(state: State, cooldown_id: str) -> Cooldown:
         if c.id == cooldown_id:
             return c
     raise CommandError(f"unknown cooldown {cooldown_id!r}")
+
+
+def find_countdown(state: State, countdown_id: str) -> Countdown:
+    for c in state.countdowns:
+        if c.id == countdown_id:
+            return c
+    raise CommandError(f"unknown timer {countdown_id!r}")
 
 
 def cooldowns_in_order(state: State) -> list[Cooldown]:

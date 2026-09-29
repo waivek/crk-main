@@ -1,22 +1,25 @@
 """Commands and the pure `apply` that turns (state, command, now) into a new state."""
 
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from . import ordering
 from .model import (
     MAX_CAPACITY,
     MAX_COOLDOWN_MINUTES,
     MAX_TARGET,
+    MAX_TIMER_SECONDS,
     Bay,
     CommandError,
     Cooldown,
+    Countdown,
     Recurrence,
     State,
     Task,
     Timer,
     find_bay,
     find_cooldown,
+    find_countdown,
     find_task,
     is_counter,
     subtasks,
@@ -199,12 +202,40 @@ class Unclaim:
     cooldown_id: str
 
 
+@dataclass(frozen=True)
+class AddCountdown:
+    """A standalone timer that ends `seconds` from now."""
+    countdown_id: str
+    title: str
+    seconds: int
+
+
+@dataclass(frozen=True)
+class EditCountdown:
+    countdown_id: str
+    title: str | None = None
+    seconds: int | None = None  # the new time left, from now
+
+
+@dataclass(frozen=True)
+class RestartCountdown:
+    """Run it again for the same length, from now."""
+    countdown_id: str
+
+
+@dataclass(frozen=True)
+class RemoveCountdown:
+    """Delete it, or dismiss it once it's over."""
+    countdown_id: str
+
+
 Command = (
     AddBay | RenameBay | RemoveBay | MoveBay
     | AddTask | EditTask | RemoveTask | DuplicateTask | Complete | Uncomplete | SetProgress
     | MoveTask | MoveToTop | MoveToBottom | SetEnabled
     | StartTimer | StopTimer | SetReminder | ClearReminder
     | AddCooldown | EditCooldown | RemoveCooldown | MoveCooldown | Claim | Unclaim
+    | AddCountdown | EditCountdown | RestartCountdown | RemoveCountdown
 )
 
 
@@ -280,7 +311,7 @@ def _fresh_copy(task: Task, new_id: str, **changes) -> Task:
 
 
 def _require_new_id(state: State, new_id: str) -> None:
-    if any(x.id == new_id for x in (*state.bays, *state.tasks, *state.cooldowns)):
+    if any(x.id == new_id for x in (*state.bays, *state.tasks, *state.cooldowns, *state.countdowns)):
         raise CommandError(f"id {new_id!r} already exists")
 
 
@@ -314,6 +345,21 @@ def _check_value(value: int, capacity: int) -> int:
     if not 0 <= value <= capacity:
         raise CommandError(f"the current value must be between 0 and {capacity} (what it holds up to)")
     return value
+
+
+def _check_seconds(seconds: int) -> int:
+    if not 1 <= seconds <= MAX_TIMER_SECONDS:
+        raise CommandError(f"a timer must be between 1 second and {MAX_TIMER_SECONDS // 86400} days")
+    return seconds
+
+
+def _countdown_for(countdown: Countdown, seconds: int, now: datetime) -> Countdown:
+    """Set to end `seconds` from now."""
+    return replace(countdown, ends_at=now + timedelta(seconds=seconds), seconds=seconds)
+
+
+def _put_countdown(state: State, countdown: Countdown) -> State:
+    return replace(state, countdowns=tuple(countdown if c.id == countdown.id else c for c in state.countdowns))
 
 
 def _put_cooldown(state: State, cooldown: Cooldown) -> State:
@@ -501,5 +547,26 @@ def apply(state: State, cmd: Command, now: datetime) -> tuple[State, list[Event]
             if is_full(cooldown, now):
                 return state, []
             return _set_cooldown(state, cooldown, emptied_at=None), []
+
+        case AddCountdown(countdown_id, title, seconds):
+            _require_new_id(state, countdown_id)
+            blank = Countdown(id=countdown_id, title=_clean_name(title), ends_at=now, seconds=0)
+            return replace(state, countdowns=state.countdowns + (_countdown_for(blank, _check_seconds(seconds), now),)), []
+
+        case EditCountdown(countdown_id, title, seconds):
+            countdown = find_countdown(state, countdown_id)
+            if title is not None:
+                countdown = replace(countdown, title=_clean_name(title))
+            if seconds is not None:
+                countdown = _countdown_for(countdown, _check_seconds(seconds), now)
+            return _put_countdown(state, countdown), []
+
+        case RestartCountdown(countdown_id):
+            countdown = find_countdown(state, countdown_id)
+            return _put_countdown(state, _countdown_for(countdown, countdown.seconds, now)), []
+
+        case RemoveCountdown(countdown_id):
+            find_countdown(state, countdown_id)
+            return replace(state, countdowns=tuple(c for c in state.countdowns if c.id != countdown_id)), []
 
     raise CommandError(f"unknown command {cmd!r}")

@@ -35,9 +35,9 @@ _migrated: set[str] = set()
 
 @todo_bp.context_processor
 def _asset_version() -> dict:
-    """Cache-busting token for static URLs: changes whenever app.css / app.js change on disk."""
+    """Cache-busting token for static URLs: changes whenever a static file changes on disk."""
     static = TODO_DIR / "static"
-    return {"asset_v": int(max((static / f).stat().st_mtime for f in ("app.css", "app.js")))}
+    return {"asset_v": int(max((static / f).stat().st_mtime for f in ("app.css", "app.js", "logic.js")))}
 
 
 @todo_bp.record_once
@@ -122,7 +122,10 @@ def _view_for(ws: str, h: history.History | None = None, now: datetime | None = 
     h = h or db.load_history(_conn(), _workspace_user(ws))
     view = build_view(h.present, now, can_undo=h.can_undo, can_redo=h.can_redo)
     view["suggested"] = [] if ws == "preset" else service.suggested_dicts(_conn(), h.present, now, _ids())
-    return filter_view(view, request.args.get("category"), hide_done=request.args.get("hide_done") == "1")
+    return filter_view(
+        view, request.args.get("category"), hide_done=request.args.get("hide_done") == "1",
+        hidden_tags=frozenset(request.args.getlist("hide_tag")),
+    )
 
 
 def _render_app(ws: str, username: str):

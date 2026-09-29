@@ -60,9 +60,9 @@
   <button type="button" role="tab" id="tab-tasks" data-tab="tasks" aria-controls="panel-tasks" aria-selected="true">
     <span class="material-symbols-outlined" aria-hidden="true">checklist</span>Tasks
   </button>
-  <button type="button" role="tab" id="tab-cooldowns" data-tab="cooldowns" aria-controls="panel-cooldowns" aria-selected="false">
-    <span class="material-symbols-outlined" aria-hidden="true">hourglass_empty</span>Cooldowns
-    <span class="badge" id="cooldowns-full" title="Full: ready to claim" hidden></span>
+  <button type="button" role="tab" id="tab-cooldowns" data-tab="timers" aria-controls="panel-cooldowns" aria-selected="false">
+    <span class="material-symbols-outlined" aria-hidden="true">timer</span>Timers
+    <span class="badge" id="timers-ready" hidden></span>
   </button>
 </nav>
 
@@ -72,6 +72,36 @@
 </div>
 
 <div id="panel-cooldowns" role="tabpanel" aria-labelledby="tab-cooldowns" hidden>
+  {% if mode != "preset" %}
+  <section class="bay timers">
+    <header class="bay-head">
+      <h2>Timers</h2>
+      <span class="progress" id="timers-progress"></span>
+    </header>
+    <form id="timer-add" class="timer-add" autocomplete="off">
+      <input name="title" maxlength="200" placeholder="What, e.g. Mine Venture" aria-label="Timer name">
+      <div class="timer-time">
+        <span class="time-picker">
+          <label class="unit"><input type="number" name="hours" min="0" max="23" placeholder="0" inputmode="numeric" aria-label="Hours left">h</label>
+          <span class="time-menu hours" role="listbox" aria-label="Common hours" hidden>
+            <button type="button" role="option" data-value="1">1h</button><button type="button" role="option" data-value="2">2h</button><button type="button" role="option" data-value="3">3h</button><button type="button" role="option" data-value="4">4h</button><button type="button" role="option" data-value="5">5h</button><button type="button" role="option" data-value="6">6h</button><button type="button" role="option" data-value="7">7h</button><button type="button" role="option" data-value="8">8h</button><button type="button" role="option" data-value="9">9h</button><button type="button" role="option" data-value="10">10h</button><button type="button" role="option" data-value="11">11h</button><button type="button" role="option" data-value="12">12h</button>
+          </span>
+        </span>
+        <span class="time-picker">
+          <label class="unit"><input type="number" name="minutes" min="0" max="59" placeholder="0" inputmode="numeric" aria-label="Minutes left" enterkeyhint="go">m</label>
+          <span class="time-menu" role="listbox" aria-label="Common minutes" hidden>
+            <button type="button" role="option" data-value="15">15 min</button>
+            <button type="button" role="option" data-value="30">30 min</button>
+            <button type="button" role="option" data-value="45">45 min</button>
+          </span>
+        </span>
+        <button class="primary"><span class="material-symbols-outlined" aria-hidden="true">play_arrow</span>Start</button>
+      </div>
+      <p class="form-error" role="alert" hidden></p>
+    </form>
+    <ul class="tasks" id="timers"></ul>
+  </section>
+  {% endif %}
   <section class="bay cooldowns">
     <header class="bay-head">
       <h2>Cooldowns</h2>
@@ -168,6 +198,40 @@
   </form>
 </dialog>
 
+<dialog id="timer-dialog">
+  <form id="timer-form" class="stack">
+    <h2>Edit timer</h2>
+    <label>Title
+      <input name="title" maxlength="200" autocomplete="off">
+    </label>
+    <fieldset>
+      <legend>Time left</legend>
+      <div class="timer-time">
+        <span class="time-picker">
+          <label class="unit"><input type="number" name="hours" min="0" max="23" inputmode="numeric" aria-label="Hours left">h</label>
+          <span class="time-menu hours" role="listbox" aria-label="Common hours" hidden>
+            <button type="button" role="option" data-value="1">1h</button><button type="button" role="option" data-value="2">2h</button><button type="button" role="option" data-value="3">3h</button><button type="button" role="option" data-value="4">4h</button><button type="button" role="option" data-value="5">5h</button><button type="button" role="option" data-value="6">6h</button><button type="button" role="option" data-value="7">7h</button><button type="button" role="option" data-value="8">8h</button><button type="button" role="option" data-value="9">9h</button><button type="button" role="option" data-value="10">10h</button><button type="button" role="option" data-value="11">11h</button><button type="button" role="option" data-value="12">12h</button>
+          </span>
+        </span>
+        <span class="time-picker">
+          <label class="unit"><input type="number" name="minutes" min="0" max="59" inputmode="numeric" aria-label="Minutes left">m</label>
+          <span class="time-menu" role="listbox" aria-label="Common minutes" hidden>
+            <button type="button" role="option" data-value="15">15 min</button>
+            <button type="button" role="option" data-value="30">30 min</button>
+            <button type="button" role="option" data-value="45">45 min</button>
+          </span>
+        </span>
+      </div>
+      <small class="muted">Leave it as is to keep the timer running unchanged.</small>
+    </fieldset>
+    <p class="form-error" role="alert" hidden></p>
+    <menu class="row end">
+      <button type="button" id="timer-cancel">Cancel</button>
+      <button class="primary">Save</button>
+    </menu>
+  </form>
+</dialog>
+
 <dialog id="cooldown-dialog">
   <form id="cooldown-form" class="stack">
     <h2 id="cooldown-dialog-title">Add cooldown</h2>
@@ -234,5 +298,6 @@
 
 <script id="initial-view" type="application/json">{{ initial_view|tojson }}</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+<script src="{{ url_for('todo.static', filename='logic.js', v=asset_v) }}"></script>
 <script src="{{ url_for('todo.static', filename='app.js', v=asset_v) }}"></script>
 {% endblock %}

@@ -9,6 +9,13 @@ Live at https://crk.stardews.com/tools/todo/
   - All logic lives in `core/`. It is pure: no I/O, no clock, no randomness, and `now` is always passed in. Each rule is testable without the UI.
   - The shell (`shell/`, templates, static files) only does I/O. Don't couple logic with the view.
   - New rules belong in `core/` together with tests. The JS only renders the server's view model and sends commands.
+  - The same split applies in the client. `static/logic.js` holds pure client-side rules: filter
+    state (the tag only/hide toggles and the status line), the view query, duration and time
+    parsing, the timer and dialog field checks, and the windows editor. They take `now` and their
+    inputs as arguments. `app.js` reads the DOM, calls them and renders. Tests are in
+    `tests/logic.test.js` (`node --test`). Lint once with
+    `npx --yes eslint@9 --no-config-lookup --rule '{"no-undef":"error","no-unused-vars":"warn"}' --global '$,window,document,…'`
+    (nothing is installed in the repo).
 - **Python:** use `uv` for everything (`uv run …`, `uv add …`). Never use pip or `.venv/bin/python`.
 - **Screenshots:** don't try to take any. Headless browsers don't work on this box, and the user asked us to stop. The user reports visual issues themselves. To inspect state, use the robot account or the CLI (below).
 - **UI style:**
@@ -22,7 +29,9 @@ Live at https://crk.stardews.com/tools/todo/
 ## Run, test, deploy
 
 ```bash
-uv run pytest tools/todo/tests -q          # 215 tests, ~4s (run from the repo root)
+uv run pytest tools/todo/tests -q          # 245 tests, ~5s (run from the repo root); includes the JS tests
+node --test tools/todo/tests/logic.test.js # just the JS tests (22), via test_logic_js.py in pytest too
+node --check tools/todo/static/app.js      # JS syntax check (Node 24 from NodeSource, system-wide)
 kill -HUP <gunicorn master pid>            # reload after Python/template changes
 ps -eo pid,args | grep "gunicorn.*crk-main-api" | grep -v grep   # master = the python3 line whose parent is `uv run`
 ```
@@ -30,8 +39,14 @@ ps -eo pid,args | grep "gunicorn.*crk-main-api" | grep -v grep   # master = the 
 - **Server:** gunicorn runs on `127.0.0.1:5183` with 1 worker, started by the user **without `--reload`**. At the time of writing the master pid was 2141410. After changing Python or templates, send it a HUP.
 - **Static files:** CSS/JS changes need no reload. The asset URLs carry `?v=<mtime>` (see `_asset_version` in `shell/web.py`) because Cloudflare/browsers cache for 4 hours.
 - **Database:** SQLite at `tools/todo/data/todo.sqlite3` (gitignored via `data/`). The session secret is in `data/secret_key`.
-- **Migrations:** `shell/db.py` `MIGRATIONS` is **append-only** and indexed by `PRAGMA user_version` (currently 10). It runs automatically on the first request after a reload.
-- **Git:** nothing under `tools/` is committed yet (untracked). There are also unrelated pending changes in the repo. Ask before committing.
+- **Migrations:** `shell/db.py` `MIGRATIONS` is **append-only** and indexed by `PRAGMA user_version` (currently 11). It runs automatically on the first request after a reload.
+- **Git:** everything is committed on `master`. As of 2026-09-29 the tip is the "Timers tab…" commit (not pushed); check `git status -sb`. The app spans `tools/todo/`, `tools/__init__.py`, `crk-main-api.py` (mounts the blueprint, plus unrelated `/guides/` and `/icons/` routes), and the deps in `pyproject.toml` / `uv.lock`. Ask before committing or pushing.
+  - **Commit messages:** the user wants them written to `tools/todo/commit.md` (gitignored, repo-wide), then committed with `git commit -F tools/todo/commit.md`. Don't use `-a` unless every pending change belongs in the commit, and check `git status` first. End messages with the Co-Authored-By line.
+  - **Gitignored:** `data/` (database, backup, secret), `__pycache__/`, `logs/` (gunicorn log) and `commit.md`.
+  - **The remote URL embeds a GitHub token** (`git remote -v`). The user was advised to revoke it and
+    switch to `gh auth login`. Don't print or copy it.
+- **New VPS:** `CHECKLIST.md` at the repo root is the terse setup list: SSH hardening, uv, node, gh,
+  clone and test, the uv deps, copying data, a gunicorn systemd unit, and cloudflared.
 
 ## Debug access (no login needed)
 
@@ -39,7 +54,7 @@ ps -eo pid,args | grep "gunicorn.*crk-main-api" | grep -v grep   # master = the 
 |---|---|
 | Public robot account (full normal UI) | https://crk.stardews.com/tools/todo/robot/ |
 | Robot's state as text / JSON | `/tools/todo/debug/robot`, `/tools/todo/debug/robot.json` (`?now=2026-09-25T15:00:00Z` time-travels) |
-| Drive robot over HTTP | `POST /tools/todo/robot/api/command` with `{"type": ...}`; also `/robot/api/undo`, `/redo`, `/suggested`, `/preview`, `/import`; `GET /robot/api/view` (`?category=…&hide_done=1`), `/missing` |
+| Drive robot over HTTP | `POST /tools/todo/robot/api/command` with `{"type": ...}`; also `/robot/api/undo`, `/redo`, `/suggested`, `/preview`, `/import`; `GET /robot/api/view` (`?category=…&hide_done=1&hide_tag=…`), `/missing` |
 | Any user, straight from SQLite | `uv run python -m tools.todo.debug show vivek` · `cmd vivek '<json>'` · `undo`/`redo` · `users` · `make-admin`/`revoke-admin` · `show preset` · `--now`, `--json` |
 
 The reserved usernames are `robot` and `preset`; signup rejects both. The users are `vivek` (admin), `robot` and `preset`.
@@ -51,14 +66,14 @@ When you test on robot, **undo afterwards** so the user sees it unchanged.
 crk-main-api.py            registers todo_bp at /tools/todo
 tools/todo/
   core/        PURE
-    model.py       Task, Bay, Cooldown, State, Recurrence, Timer (frozen dataclasses)
-    schedule.py    resets (KST), is_done, is_active, item_done/active (groups), progress, next_reset,
-                   cooldown level/is_full/next_refill_at/full_at
+    model.py       Task, Bay, Cooldown, Countdown, State, Recurrence, Timer (frozen dataclasses)
+    schedule.py    resets (KST), is_done, is_active, item_done/active (groups), is_fresh/item_fresh,
+                   progress, next_reset, cooldown level/is_full/next_refill_at/full_at, countdown_over
     commands.py    command dataclasses + apply(state, cmd, now) -> (state, events)
     ordering.py    move/renumber tasks & bays
     history.py     undo/redo stack (100 steps)
     preset.py      admin preset: instantiate for new users, missing() / suggested(), import_items(), hide()
-    view.py        build_view(state, now) -> JSON dict; filter_view(view, tag, hide_done);
+    view.py        build_view(state, now) -> JSON dict; filter_view(view, tag, hide_done, hidden_tags);
                    missing_view (Browse list); labels (recurrence, cooldown, windows)
     codec.py       dict <-> model, validated parse_command(payload, fresh_id); upgrades old
                    "cooldown" tasks into Cooldowns on load (_adopt_legacy_cooldowns)
@@ -73,9 +88,10 @@ tools/todo/
     auth.py        werkzeug hashing, session, CSRF (X-CSRF-Token header for API)
   debug.py       CLI
   templates/todo/  app.html (single page), login/signup
-  static/          app.js (jQuery renderer), app.css
+  static/          logic.js (pure client rules, window.TodoLogic / require()), app.js (jQuery renderer), app.css
   tests/           pytest; conftest pins reset to UTC midnight (KST tests opt in). One file per
-                   feature: test_cooldowns, test_windows, test_browse, test_duplicate, …
+                   feature: test_cooldowns, test_countdowns, test_fresh, test_hide_tags, test_windows, …
+                   logic.test.js (node --test) is run by test_logic_js.py.
 ```
 
 The request flow: load history → pure step (`apply` / `undo` / `import_item` …) → save → `build_view` → JSON.
@@ -105,7 +121,32 @@ The state is saved as whole-user rows plus JSON snapshots for undo.
       and rejects overlaps and anything crossing midnight; 24:00 is written as an end of 00:00.
     - The view's `window` gives `open`, `closes_at`, `opens_at` and `times`. "Add window" in the
       dialog repeats the gap between the last two rows.
-- **Cooldowns tab** (`#cooldowns` in the URL): things that refill on their own timer and are
+- **Timers tab** (`#timers` in the URL; `#cooldowns` still opens it): standalone timers on top,
+  then the cooldowns.
+  - A **timer** is a `Countdown` (`State.countdowns`, table `countdowns`, migration 11): a title,
+    `ends_at`, and `seconds` (the length it was last set to). It's a "Timer" in the UI and a
+    countdown in code, because `Timer` is the old per-task timer.
+  - **Quick add** is always visible: a name, then separate **hours** (0–23) and **minutes** (0–59)
+    number fields, then Enter. `logic.js` `timerFields` enforces the limits (blank counts as 0), as do
+    the inputs' `max` attributes. The core still accepts up to 7 days through the API. The edit
+    dialog has the same fields, pre-filled by `splitTimeLeft`. They're left blank when the timer is
+    over or has more than 23h left.
+  - Layout is phone first: the name on row 1, and `[h ▾] [m ▾] … [Start]` on row 2. Rows merge into
+    one line at a container width of 36rem or more. Tapping either field opens its `.time-menu`
+    (hours 1–12 in a 4×3 grid; minutes 15/30/45). Its buttons `preventDefault` on
+    pointerdown/mousedown so the input keeps focus (iOS doesn't focus buttons). The timer inputs use
+    16px text so iOS doesn't zoom in.
+  - Commands: `add_countdown` (title, seconds), `edit_countdown` (title and/or seconds, where
+    seconds is the new time left from now), `restart_countdown` (the same length again, from now),
+    and `remove_countdown` (delete or dismiss).
+  - Ordered by `ends_at`. A finished one stays and rings (warn border and tint, "Time's up · 20:35",
+    a **Done** button) until dismissed. Finished ones count toward the tab's single badge (timers up + cooldowns full; yellow while a timer is up) and show in
+    the page title ("(1) Todo"), which shows in a background tab.
+  - In the edit dialog, leaving the time untouched (or clearing both fields) keeps the timer running as it is.
+  - Not shown on the admin preset page, and preset copies don't include timers.
+  - **Task timers are retired from the UI.** "Start timer" is gone from the task menu. An existing
+    task timer still shows its "Ends" chip and can be stopped. The core and codec still support them.
+- **Cooldowns** (on the Timers tab): things that refill on their own timer and are
   emptied by claiming them.
   - A `Cooldown` refills 1 every `minutes`, up to `capacity`. A plain cooldown such as the Fountain or
     Harbour Ship (claim, then wait 8h) is simply `capacity` 1. The level is derived from `emptied_at`
@@ -147,6 +188,12 @@ The state is saved as whole-user rows plus JSON snapshots for undo.
   has a counter or tags, or when adding while a #tag filter is active (the tag is pre-filled).
   Its summary shows what's set, e.g. "· ×5 · #ads".
 - **Resets:** all resets happen at **00:00 KST**. "Done" is derived from `completed_at` versus the last reset; there is no cron job.
+- **Available again** (`schedule.is_fresh` / `item_fresh`, view `fresh`): a weekly or every-N-days (N ≥ 2)
+  task that reset at today's daily reset and isn't done yet, e.g. a shop that restocked. It gets a
+  green left border and tint, an "Available again" chip (`new_releases` icon), and the bay header counts them ("2 available again",
+  icon and number only when narrow). It lasts until the next daily reset, and the page's 60s refresh
+  picks it up and drops it. It never applies to opted-out tasks, or to a weekly task whose reset day
+  isn't one of its active days. A group is fresh when any of its steps is.
 - **Not today:** tasks outside their active days can't be checked, counted or claimed. Unticking is still allowed.
 - **Counters:** `target >= 2`. Up to 10 shows dots, more shows a slider. Examples: Normal Ads 5, Tree of Wishes 45. Counters reset with the task.
 - **Duplicate** (row menu, `duplicate_task`): puts a fresh copy titled "… (copy)" right below the
@@ -154,7 +201,7 @@ The state is saved as whole-user rows plus JSON snapshots for undo.
   its steps (step ids are `<new id>-<n>`). The copy keeps the repeat, count target, tags and opt-out,
   but has no completion, progress, timer, reminder or preset origin.
 - **Other task features:**
-  - timers
+  - timers (legacy: shown and stoppable, but not startable; see the Timers tab)
   - reminders (badge only; there are `ReminderDue` events for a future notifier)
   - opt-out
   - #tag categories with a server-side filter
@@ -163,6 +210,18 @@ The state is saved as whole-user rows plus JSON snapshots for undo.
     `hidden_done` giving a count for "All done · N done hidden". It can be combined with a #tag. The
     setting is remembered per browser in localStorage (`todo.hideDone`), and "Not today"/closed
     tasks stay visible.
+  - **Hide tags**: each tag chip in the filter bar is split into two buttons.
+    - The **name** toggles "only this tag" (`toggleOnlyTag`).
+    - The **eye** hides the tag or shows it again (`toggleHideTag`). Hiding the "only" tag also
+      drops that filter.
+    - States: shown, only (solid blue chip), and hidden (dashed, struck through, eye crossed out).
+      Row tags behave like the name: they toggle only-this-tag and un-hide the tag.
+    - A status line under the bar spells out the filter ("Only #Weekly · Hiding #Ads, #Events"),
+      with a "Show all" link. "All" also clears everything.
+    - Server side: `?hide_tag=A&hide_tag=B`, `filter_view(..., hidden_tags=)`. It drops tasks
+      carrying any hidden tag along with their steps, drops tagged steps, and drops groups left with
+      no steps. Bays stay, and `hidden_tagged` counts for "N hidden by tag". Hiding wins over show-only.
+    - Remembered in localStorage (`todo.hiddenTags`, shared by all workspaces in the browser).
   - undo/redo (Ctrl+Z / Ctrl+Shift+Z)
 - **Admin preset** (`/tools/todo/admin/`):
   - New users start with a copy of it.
@@ -193,11 +252,15 @@ The state is saved as whole-user rows plus JSON snapshots for undo.
 - **Narrow screens:** below 30rem, `.hide-narrow` bay buttons fold into a bay ⋮ menu (`.show-narrow`).
   Anything hidden this way needs a menu equivalent, or phones lose it.
 - **Menus:** every row and bay has a `view-transition-name`, which makes each one a stacking context. Open kebab menus rely on `.bay:has(.menu[open])` and `.task:has(.menu[open])` getting `z-index`. Don't put `overflow: clip` on `.bay`.
-- **Form CSS:** `.stack label` out-specifies plain classes. The dialog's show/hide rules are scoped under `#task-form` / `#cooldown-form`.
+- **Form CSS:** `.stack label` out-specifies plain classes. The dialog's show/hide rules are scoped under `#task-form` / `#cooldown-form` / `#timer-form`.
+- **`hidden` vs `display`:** a class that sets `display` (e.g. `.badge`, `.time-menu`) overrides the
+  `hidden` attribute. Add `&[hidden] { display: none; }`, or a stray "0" badge shows up.
+- **Bottom corners:** the bay's last row rounds its own bottom corners (the fresh/due border, tint
+  and hover), because the bay can't clip them without cutting off menus.
 - **Hidden form fields:** don't put `required` or restrictive `min` on inputs that can be hidden
   (collapsed `<details>`, other repeat kinds' fieldsets). The browser then blocks submit without
   saying anything. Validate in JS, and in the core.
-- **Filters stack:** `filter_view` applies the #tag filter, then hide-done. When changing either,
+- **Filters stack:** `filter_view` applies hidden tags, then the #tag filter, then hide-done. When changing any,
   test them combined (e.g. a group narrowed to one tagged step that is then done).
 - **Transactions:** `service.mutate` opens `BEGIN IMMEDIATE`. Read the preset **before** calling it; nested transactions fail.
 - **Time zones:** date math for game days uses the reset timezone (`RESET_TZ`). The tests pin UTC through `conftest.py`.
@@ -206,12 +269,13 @@ The state is saved as whole-user rows plus JSON snapshots for undo.
 
 - **Placeholder names:** "Starlight Island 1/2/3" are placeholders; the real names were never given. They can be renamed in the admin preset.
 - **Notifications:** nothing alerts the user when a timer, reminder, window or cooldown comes due;
-  only the page's chips change. The core already emits `ReminderDue` / `Completed` / `Claimed`
+  only the page changes (for a finished timer: the row, the tab badge and the "(1) Todo" page title).
+  The core already emits `ReminderDue` / `Completed` / `Claimed`
   events. Proposed but not built:
   - browser notifications and sound while the tab is open;
-  - web push or Telegram for when it's closed;
-  - an **"Expires in / at"** field in the Add task dialog, for one-off timers like "Mining Bell
-    expires in 2:15". Today that's a Once task plus ⋮ → Start timer, which takes two steps.
+  - web push or Telegram for when it's closed.
+- **Suggestions offered, not taken:** nightly backups of `todo.sqlite3`, and running gunicorn under
+  systemd on this box too (today it doesn't survive a reboot).
 - **Quick add:** a per-bay "+ Add a daily task…" inline input (Enter adds a Daily checkbox) was
   proposed and liked, but not built. Only the dialog improvements were done.
 - **Cooldowns:** Duplicate exists for tasks only. The up/down buttons on waiting cooldowns change

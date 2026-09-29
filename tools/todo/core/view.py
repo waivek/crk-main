@@ -6,10 +6,11 @@ from typing import Any
 from . import config, preset as preset_rules
 from .codec import dt_to_str, recurrence_to_dict
 from .model import (
-    DAY_MINUTES, Cooldown, Recurrence, State, Task, Window, bays_in_order, cooldowns_in_order, subtasks, tasks_in_bay,
+    DAY_MINUTES, Cooldown, Countdown, Recurrence, State, Task, Window, bays_in_order, cooldowns_in_order, subtasks, tasks_in_bay,
 )
 from .schedule import (
     DAY,
+    countdown_over,
     current_window,
     daily_reset_at_or_before,
     enabled_subtasks,
@@ -20,6 +21,7 @@ from .schedule import (
     is_reminder_due,
     item_active,
     item_done,
+    item_fresh,
     level,
     next_refill_at,
     next_window_opens,
@@ -142,6 +144,8 @@ def task_view(state: State, task: Task, now: datetime) -> dict[str, Any]:
         "enabled": task.enabled,
         "done": item_done(state, task, now),
         "active": item_active(state, task, now),
+        # Reset today after a longer wait (a shop that restocked): worth a look until the next reset.
+        "fresh": item_fresh(state, task, now),
         "recurrence": recurrence_to_dict(task.recurrence),
         "recurrence_label": recurrence_label(task.recurrence),
         "resets_at": None if children else dt_to_str(resets_at(task, now)),
@@ -188,6 +192,22 @@ def cooldown_view(state: State, cooldown: Cooldown, now: datetime) -> dict[str, 
     }
 
 
+def countdown_view(countdown: Countdown, now: datetime) -> dict[str, Any]:
+    return {
+        "id": countdown.id,
+        "title": countdown.title,
+        "ends_at": dt_to_str(countdown.ends_at),
+        "seconds": countdown.seconds,
+        "over": countdown_over(countdown, now),
+        "remaining_seconds": max(0, int((countdown.ends_at - now).total_seconds())),
+    }
+
+
+def sorted_countdowns(state: State, now: datetime) -> list[Countdown]:
+    """Ending soonest first, so finished ones (ringing until dismissed) are at the top."""
+    return sorted(state.countdowns, key=lambda c: (c.ends_at, c.title.lower()))
+
+
 def sorted_cooldowns(state: State, now: datetime) -> list[Cooldown]:
     """Soonest ready first: full ones (ready now) at the top, then by when each will be full.
     Stored order breaks ties (e.g. among the full ones)."""
@@ -219,6 +239,8 @@ def build_view(state: State, now: datetime, *, can_undo: bool = False, can_redo:
         "categories": sorted({c for t in state.tasks for c in t.categories}, key=str.lower),
         "cooldowns": [cooldown_view(state, c, now) for c in sorted_cooldowns(state, now)],
         "cooldowns_full": sum(is_full(c, now) for c in state.cooldowns),
+        "countdowns": [countdown_view(c, now) for c in sorted_countdowns(state, now)],
+        "countdowns_over": sum(countdown_over(c, now) for c in state.countdowns),
         "can_undo": can_undo,
         "can_redo": can_redo,
     }
@@ -244,11 +266,40 @@ def missing_view(user: State, preset: State) -> list[dict[str, Any]]:
     ]
 
 
-def filter_view(view: dict[str, Any], category: str | None, hide_done: bool = False) -> dict[str, Any]:
-    """Narrow a built view to one #tag and/or to what's still to do. Progress counts, the tag list
+def filter_view(
+    view: dict[str, Any], category: str | None, hide_done: bool = False, hidden_tags: frozenset[str] = frozenset(),
+) -> dict[str, Any]:
+    """Narrow a built view: drop hidden #tags, keep only one #tag, and/or keep what's still to do.
+    Hiding wins over showing (a task tagged with both is hidden). Progress counts, the tag list
     and cooldowns are left as they were."""
+    view = _hide_tags(view, hidden_tags) if hidden_tags else view
     view = _only_category(view, category) if category else view
     return _hide_done(view) if hide_done else view
+
+
+def _hide_tags(view: dict[str, Any], tags: frozenset[str]) -> dict[str, Any]:
+    """Drop tasks with any of the tags (with their steps), steps with them, and groups left with
+    no steps. Every bay stays; `hidden_tagged` counts the rows it no longer shows."""
+    def keep(tasks: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+        out, hidden = [], 0
+        for t in tasks:
+            if tags.intersection(t["categories"]):
+                hidden += 1 + len(t["subtasks"])
+                continue
+            steps, hidden_steps = keep(t["subtasks"])
+            if t["subtasks"] and not steps:
+                hidden += 1 + hidden_steps  # every step was hidden, so the group goes too
+                continue
+            hidden += hidden_steps
+            out.append(t | {"subtasks": steps} if hidden_steps else t)
+        return out, hidden
+
+    bays = []
+    for b in view["bays"]:
+        tasks, hidden = keep(b["tasks"])
+        opted_out, hidden_off = keep(b["opted_out"])
+        bays.append(b | {"tasks": tasks, "opted_out": opted_out, "hidden_tagged": hidden + hidden_off})
+    return view | {"bays": bays, "hidden_tags": sorted(tags, key=str.lower)}
 
 
 def _hide_done(view: dict[str, Any]) -> dict[str, Any]:

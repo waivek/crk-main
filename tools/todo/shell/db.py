@@ -90,6 +90,17 @@ MIGRATIONS = [
     """,
     # "Starts at" became "current value", which is just the level (derived from emptied_at).
     "ALTER TABLE cooldowns DROP COLUMN start",
+    # Standalone timers ("countdowns"): one-off, ending at a set time, on the Timers tab.
+    """
+    CREATE TABLE countdowns (
+        id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        ends_at TEXT NOT NULL,
+        seconds INTEGER NOT NULL
+    );
+    CREATE INDEX countdowns_user ON countdowns(user_id)
+    """,
 ]
 
 
@@ -159,12 +170,14 @@ def load_state(conn: sqlite3.Connection, user_id: int) -> State:
         (user_id,),
     ).fetchall()
     cooldowns = conn.execute("SELECT * FROM cooldowns WHERE user_id = ?", (user_id,)).fetchall()
+    countdowns = conn.execute("SELECT id, title, ends_at, seconds FROM countdowns WHERE user_id = ?", (user_id,)).fetchall()
     # Through the codec's state dict, so rows saved before a model change are upgraded too.
     return codec.state_from_dict({
         "bays": [{"id": r["id"], "name": r["name"], "position": r["position"], "origin_id": r["origin_id"]} for r in bays],
         "tasks": [_task_dict(r) for r in tasks],
         "dismissed": json.loads(get_user(conn, user_id)["dismissed_json"]),
         "cooldowns": [dict(r) for r in cooldowns],
+        "countdowns": [dict(r) for r in countdowns],
     })
 
 
@@ -192,6 +205,11 @@ def save_state(conn: sqlite3.Connection, user_id: int, state: State) -> None:
     """Replace all of a user's rows. Call inside a transaction."""
     conn.execute("DELETE FROM bays WHERE user_id = ?", (user_id,))  # cascades to tasks
     conn.execute("DELETE FROM cooldowns WHERE user_id = ?", (user_id,))
+    conn.execute("DELETE FROM countdowns WHERE user_id = ?", (user_id,))
+    conn.executemany(
+        "INSERT INTO countdowns (id, user_id, title, ends_at, seconds) VALUES (?, ?, ?, ?, ?)",
+        [(c.id, user_id, c.title, codec.dt_to_str(c.ends_at), c.seconds) for c in state.countdowns],
+    )
     conn.executemany(
         "INSERT INTO cooldowns (id, user_id, title, position, minutes, capacity, emptied_at, origin_id)"
         " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
